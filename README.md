@@ -25,6 +25,7 @@
 git clone https://github.com/yourname/sansheng-liubu.git
 cd sansheng-liubu
 bash bin/setup.sh
+bash bin/validate.sh   # 验证安装
 ```
 
 安装向导会交互式询问：
@@ -52,6 +53,8 @@ bash bin/setup.sh --theme corporate
 - **实时看板**：全程进度可视，每个 Agent 主动上报状态
 - **异常升级**：阻塞自动逐级上报
 - **安全加固**：secrets 环境变量化、per-agent 沙箱、工具白名单
+- **多语言支持**：主题配置 `language: "en"` 自动生成英文 SOUL.md 和看板标签
+- **安装验证**：`validate.sh` 一键检查所有文件/配置是否完整
 
 ## 目录结构
 
@@ -59,13 +62,15 @@ bash bin/setup.sh --theme corporate
 sansheng-liubu/
 ├── bin/
 │   ├── setup.sh              # 交互式安装脚本
-│   ├── render_templates.py   # SOUL.md 模板渲染
-│   └── generate_config.py    # openclaw.json 生成
+│   ├── render_templates.py   # SOUL.md / kanban_config / HEARTBEAT 渲染
+│   ├── generate_config.py    # openclaw.json 生成
+│   └── validate.sh           # 安装后验证
 ├── templates/
-│   └── scripts/              # 看板脚本（部署到每个 workspace）
-│       ├── kanban_update.py
-│       ├── file_lock.py
-│       └── refresh_live_data.py
+│   └── scripts/              # 运行时脚本（部署到每个 workspace）
+│       ├── kanban_update.py   # 看板任务管理（自动加载 kanban_config.json）
+│       ├── file_lock.py       # 原子文件锁
+│       ├── refresh_live_data.py
+│       └── health_dashboard.py # 健康看板（自动加载 agent 列表）
 ├── themes/
 │   ├── imperial/theme.json   # 皇帝朝廷主题
 │   ├── corporate/theme.json  # 现代企业主题

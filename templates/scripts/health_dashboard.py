@@ -9,7 +9,9 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 OPENCLAW_DIR = Path.home() / ".openclaw"
-AGENTS = [
+
+# Default agents (imperial theme fallback)
+_DEFAULT_AGENTS = [
     ("taizi", "太子", "消息路由"),
     ("zhongshu", "中书省", "规划决策"),
     ("menxia", "门下省", "审议把关"),
@@ -22,6 +24,28 @@ AGENTS = [
     ("libu_hr", "吏部", "人事/培训"),
     ("zaochao", "早朝简报官", "情报简报"),
 ]
+
+
+def load_agents_from_config():
+    """Load agent list from openclaw.json or theme config."""
+    config_file = OPENCLAW_DIR / "openclaw.json"
+    try:
+        with open(config_file) as f:
+            config = json.load(f)
+        agents = []
+        for agent in config.get("agents", {}).get("list", []):
+            aid = agent["id"]
+            name = agent.get("identity", {}).get("name", aid)
+            desc = agent.get("description", "")
+            agents.append((aid, name, desc))
+        if agents:
+            return agents
+    except Exception:
+        pass
+    return _DEFAULT_AGENTS
+
+
+AGENTS = load_agents_from_config()
 
 
 def get_gateway_health():
@@ -115,7 +139,7 @@ def main():
     models = get_model_info()
 
     print(f"{'='*70}")
-    print(f"  三省六部健康看板  |  {now}")
+    print(f"  Health Dashboard  |  {now}")
     print(f"{'='*70}")
 
     # Gateway

@@ -34,32 +34,58 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(name)s] %(message
 # 文件锁 —— 防止多 Agent 同时读写 tasks_source.json
 from file_lock import atomic_json_read, atomic_json_update, atomic_json_write  # noqa: E402
 
-STATE_ORG_MAP = {
+# ── 从 kanban_config.json 加载主题配置（兼容无配置的旧部署） ──
+_KANBAN_CONFIG_FILE = _BASE / 'data' / 'kanban_config.json'
+
+def _load_kanban_config():
+    """Load theme-specific kanban config. Falls back to imperial defaults."""
+    if _KANBAN_CONFIG_FILE.exists():
+        try:
+            with open(_KANBAN_CONFIG_FILE) as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return None
+
+_kanban_cfg = _load_kanban_config()
+
+# Hardcoded imperial defaults (backward compatibility)
+_DEFAULT_STATE_ORG_MAP = {
     'Taizi': '太子', 'Zhongshu': '中书省', 'Menxia': '门下省', 'Assigned': '尚书省',
     'Doing': '执行中', 'Review': '尚书省', 'Done': '完成', 'Blocked': '阻塞',
 }
-
-_STATE_AGENT_MAP = {
-    'Taizi': 'main',
-    'Zhongshu': 'zhongshu',
-    'Menxia': 'menxia',
-    'Assigned': 'shangshu',
-    'Review': 'shangshu',
-    'Pending': 'zhongshu',
+_DEFAULT_STATE_AGENT_MAP = {
+    'Taizi': 'main', 'Zhongshu': 'zhongshu', 'Menxia': 'menxia',
+    'Assigned': 'shangshu', 'Review': 'shangshu', 'Pending': 'zhongshu',
 }
-
-_ORG_AGENT_MAP = {
+_DEFAULT_ORG_AGENT_MAP = {
     '礼部': 'libu', '户部': 'hubu', '兵部': 'bingbu',
     '刑部': 'xingbu', '工部': 'gongbu', '吏部': 'libu_hr',
     '中书省': 'zhongshu', '门下省': 'menxia', '尚书省': 'shangshu',
 }
-
-_AGENT_LABELS = {
+_DEFAULT_AGENT_LABELS = {
     'main': '太子', 'taizi': '太子',
     'zhongshu': '中书省', 'menxia': '门下省', 'shangshu': '尚书省',
     'libu': '礼部', 'hubu': '户部', 'bingbu': '兵部', 'xingbu': '刑部',
     'gongbu': '工部', 'libu_hr': '吏部', 'zaochao': '钦天监',
 }
+
+STATE_ORG_MAP = _kanban_cfg['state_org_map'] if _kanban_cfg else _DEFAULT_STATE_ORG_MAP
+_STATE_AGENT_MAP = _kanban_cfg['state_agent_map'] if _kanban_cfg else _DEFAULT_STATE_AGENT_MAP
+_ORG_AGENT_MAP = _kanban_cfg['org_agent_map'] if _kanban_cfg else _DEFAULT_ORG_AGENT_MAP
+_AGENT_LABELS = _kanban_cfg['agent_labels'] if _kanban_cfg else _DEFAULT_AGENT_LABELS
+_OWNER_TITLE = _kanban_cfg['owner_title'] if _kanban_cfg else '皇上'
+_TASK_PREFIX = _kanban_cfg['task_prefix'] if _kanban_cfg else 'JJC'
+
+# Localized labels (determined by whether config exists and language)
+L_DONE = 'Task completed' if (_kanban_cfg and _kanban_cfg.get('owner_title', '') == _kanban_cfg.get('owner_title', '')) else '任务已完成'
+# Simple heuristic: if owner_title is ASCII, use English
+if _kanban_cfg and all(ord(c) < 128 for c in _kanban_cfg.get('owner_title', 'x')):
+    L_DONE = 'Task completed'
+    L_ORDER_ISSUED = 'Order issued, awaiting {org}'
+else:
+    L_DONE = '任务已完成'
+    L_ORDER_ISSUED = '已下旨，等待{org}接旨'
 
 MAX_PROGRESS_LOG = 100  # 单任务最大进展日志条数
 
@@ -113,7 +139,9 @@ def _normalize_tasks(tasks):
     return [_normalize_task_fields(t) for t in tasks]
 
 
-def next_task_id(prefix='JJC', date_str=None):
+def next_task_id(prefix=None, date_str=None):
+    if prefix is None:
+        prefix = _TASK_PREFIX
     """返回当天第一个未被占用的任务号。"""
     if not date_str:
         date_str = datetime.datetime.now().strftime('%Y%m%d')
@@ -228,7 +256,7 @@ def cmd_create(task_id, title, state, org, official, remark=None):
         print(f'[看板] 拒绝创建：{reason}', flush=True)
         return
     actual_org = STATE_ORG_MAP.get(state, org)
-    clean_remark = _sanitize_remark(remark) if remark else f"下旨：{title}"
+    clean_remark = _sanitize_remark(remark) if remark else f"{_OWNER_TITLE}: {title}"
     create_conflict = {'state': None}
     created = {'ok': False}
 
@@ -245,10 +273,10 @@ def cmd_create(task_id, title, state, org, official, remark=None):
         tasks.insert(0, {
             "id": task_id, "title": title, "official": official,
             "org": actual_org, "state": state, "status": state,
-            "now": clean_remark[:60] if remark else f"已下旨，等待{actual_org}接旨",
-            "currentUpdate": clean_remark[:60] if remark else f"已下旨，等待{actual_org}接旨",
+            "now": clean_remark[:60] if remark else L_ORDER_ISSUED.format(org=actual_org),
+            "currentUpdate": clean_remark[:60] if remark else L_ORDER_ISSUED.format(org=actual_org),
             "eta": "-", "block": "无", "blockers": "无", "output": "", "ac": "",
-            "flow_log": [{"at": now_iso(), "from": "皇上", "to": actual_org, "remark": clean_remark}],
+            "flow_log": [{"at": now_iso(), "from": _OWNER_TITLE, "to": actual_org, "remark": clean_remark}],
             "updatedAt": now_iso()
         })
         created['ok'] = True
@@ -264,7 +292,9 @@ def cmd_create(task_id, title, state, org, official, remark=None):
     return 0
 
 
-def cmd_next_id(prefix='JJC', date_str=None):
+def cmd_next_id(prefix=None, date_str=None):
+    if prefix is None:
+        prefix = _TASK_PREFIX
     task_id = next_task_id(prefix=prefix, date_str=date_str)
     print(task_id, flush=True)
     return 0
@@ -321,11 +351,11 @@ def cmd_done(task_id, output_path='', summary=''):
         t['state'] = 'Done'
         t['status'] = 'Done'
         t['output'] = output_path
-        t['now'] = summary or '任务已完成'
-        t['currentUpdate'] = summary or '任务已完成'
+        t['now'] = summary or L_DONE
+        t['currentUpdate'] = summary or L_DONE
         t.setdefault('flow_log', []).append({
             "at": now_iso(), "from": t.get('org', '执行部门'),
-            "to": "皇上", "remark": f"✅ 完成：{summary or '任务已完成'}"
+            "to": _OWNER_TITLE, "remark": f"✅ {L_DONE}: {summary or L_DONE}"
         })
         t['updatedAt'] = now_iso()
         return tasks
@@ -498,7 +528,7 @@ if __name__ == '__main__':
     if cmd == 'create':
         sys.exit(cmd_create(args[1], args[2], args[3], args[4], args[5], args[6] if len(args)>6 else None))
     elif cmd == 'next-id':
-        sys.exit(cmd_next_id(args[1] if len(args) > 1 else 'JJC', args[2] if len(args) > 2 else None))
+        sys.exit(cmd_next_id(args[1] if len(args) > 1 else None, args[2] if len(args) > 2 else None))
     elif cmd == 'state':
         cmd_state(args[1], args[2], args[3] if len(args)>3 else None)
     elif cmd == 'flow':

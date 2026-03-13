@@ -148,20 +148,14 @@ for agent in "${ALL_AGENTS[@]}"; do
 done
 info "看板脚本已部署到所有 workspace"
 
-# ---------- 复制共享上下文 ----------
-for agent in "${ALL_AGENTS[@]}"; do
-  cp "$TEMPLATES_DIR/shared-context/ORG-STRUCTURE.md" "$OPENCLAW_DIR/workspace-$agent/shared-context/"
-done
-info "共享上下文已同步"
-
-# ---------- 生成 SOUL.md (使用模板引擎) ----------
+# ---------- 生成 SOUL.md + 共享上下文 + 看板配置 ----------
 python3 "$PROJECT_DIR/bin/render_templates.py" \
   --theme "$THEME_FILE" \
   --openclaw-dir "$OPENCLAW_DIR" \
   --primary-model "$PRIMARY_MODEL" \
   --light-model "$LIGHT_MODEL" \
   --task-prefix "$TASK_PREFIX"
-info "SOUL.md / AGENTS.md 已生成"
+info "SOUL.md / HEARTBEAT.md / ORG-STRUCTURE.md / kanban_config.json 已生成"
 
 # ---------- 生成 openclaw.json ----------
 python3 "$PROJECT_DIR/bin/generate_config.py" \

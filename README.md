@@ -79,6 +79,23 @@ python3 ~/.openclaw/workspace-taizi/scripts/health_dashboard.py
 - `startup` → `workspace-secretary`
 - `corporate` → `workspace-assistant`
 
+示例输出：
+
+```text
+======================================================================
+  Health Dashboard  |  2026-03-14 07:34:00
+======================================================================
+
+--- Agent 状态 ---
+  Agent        名称         模型                       工作区活动        会话活动
+  assistant    EA         openai-codex/gpt-5.4     8分钟前         无记录
+  vp_strategy  VP Strategy openai-codex/gpt-5.4     8分钟前         无记录
+  ...
+
+--- 活跃任务 (0) ---
+  无活跃任务
+```
+
 ### 5. 首次使用建议
 
 - 先发一条简单消息，确认路由 Agent 能正常接收并回复

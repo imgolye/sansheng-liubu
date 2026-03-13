@@ -1,0 +1,102 @@
+{
+  "name": "startup",
+  "display_name": "创业团队",
+  "description": "扁平化创业团队 — 快速迭代，最小流程",
+  "language": "zh-CN",
+  "owner_title": "老板",
+  "task_prefix": "TODO",
+  "tone": "直接高效，不废话",
+  "roles": {
+    "router": {
+      "agent_id": "secretary",
+      "title": "秘书",
+      "identity_name": "小秘",
+      "description": "消息分拣、建任务、汇报",
+      "model_tier": "primary"
+    },
+    "planner": {
+      "agent_id": "pm",
+      "title": "产品经理",
+      "identity_name": "PM",
+      "description": "需求分析、方案设计",
+      "model_tier": "primary"
+    },
+    "reviewer": {
+      "agent_id": "tech_lead",
+      "title": "技术负责人",
+      "identity_name": "Tech Lead",
+      "description": "技术评审（仅重大变更）",
+      "model_tier": "light"
+    },
+    "dispatcher": {
+      "agent_id": "scrum_master",
+      "title": "Scrum Master",
+      "identity_name": "SM",
+      "description": "任务分配、进度跟踪",
+      "model_tier": "primary"
+    },
+    "departments": {
+      "engineering": {
+        "agent_id": "fullstack",
+        "title": "全栈开发",
+        "identity_name": "全栈",
+        "description": "前后端开发",
+        "model_tier": "primary",
+        "sandbox": "non-main",
+        "elevated": true
+      },
+      "operations": {
+        "agent_id": "ops",
+        "title": "运维",
+        "identity_name": "运维",
+        "description": "部署上线",
+        "model_tier": "primary",
+        "sandbox": "non-main",
+        "elevated": true
+      },
+      "analytics": {
+        "agent_id": "analyst",
+        "title": "数据分析",
+        "identity_name": "分析师",
+        "description": "数据看板、用户分析",
+        "model_tier": "primary",
+        "sandbox": "off",
+        "elevated": false
+      },
+      "communications": {
+        "agent_id": "content",
+        "title": "内容运营",
+        "identity_name": "运营",
+        "description": "文案、公众号、社媒",
+        "model_tier": "light",
+        "sandbox": "off",
+        "elevated": false
+      },
+      "quality": {
+        "agent_id": "tester",
+        "title": "测试",
+        "identity_name": "QA",
+        "description": "功能测试、自动化",
+        "model_tier": "primary",
+        "sandbox": "non-main",
+        "elevated": false
+      },
+      "hr": {
+        "agent_id": "admin",
+        "title": "行政",
+        "identity_name": "行政",
+        "description": "招聘、培训、日常事务",
+        "model_tier": "primary",
+        "sandbox": "all",
+        "elevated": false
+      }
+    },
+    "briefing": {
+      "agent_id": "news_bot",
+      "title": "资讯播报",
+      "identity_name": "播报员",
+      "description": "行业动态日报",
+      "model_tier": "light"
+    }
+  }
+}

@@ -1,0 +1,102 @@
+{
+  "name": "corporate",
+  "display_name": "现代企业",
+  "description": "CEO → VP → Directors → Teams 现代企业组织架构",
+  "language": "en",
+  "owner_title": "CEO",
+  "task_prefix": "TASK",
+  "tone": "Professional, concise, action-oriented",
+  "roles": {
+    "router": {
+      "agent_id": "assistant",
+      "title": "Executive Assistant",
+      "identity_name": "EA",
+      "description": "Message routing, task creation, status reporting",
+      "model_tier": "primary"
+    },
+    "planner": {
+      "agent_id": "vp_strategy",
+      "title": "VP Strategy",
+      "identity_name": "VP Strategy",
+      "description": "Strategic planning, proposal drafting",
+      "model_tier": "primary"
+    },
+    "reviewer": {
+      "agent_id": "vp_compliance",
+      "title": "VP Compliance",
+      "identity_name": "VP Compliance",
+      "description": "Review and approval (critical tasks only)",
+      "model_tier": "light"
+    },
+    "dispatcher": {
+      "agent_id": "coo",
+      "title": "COO",
+      "identity_name": "COO",
+      "description": "Execution dispatch, team coordination",
+      "model_tier": "primary"
+    },
+    "departments": {
+      "engineering": {
+        "agent_id": "engineering",
+        "title": "Engineering",
+        "identity_name": "VP Engineering",
+        "description": "Development, architecture, code",
+        "model_tier": "primary",
+        "sandbox": "non-main",
+        "elevated": true
+      },
+      "operations": {
+        "agent_id": "devops",
+        "title": "DevOps",
+        "identity_name": "DevOps Lead",
+        "description": "Infrastructure, deployment, security",
+        "model_tier": "primary",
+        "sandbox": "non-main",
+        "elevated": true
+      },
+      "analytics": {
+        "agent_id": "data_team",
+        "title": "Data Team",
+        "identity_name": "Data Lead",
+        "description": "Analytics, reporting, metrics",
+        "model_tier": "primary",
+        "sandbox": "off",
+        "elevated": false
+      },
+      "communications": {
+        "agent_id": "marketing",
+        "title": "Marketing",
+        "identity_name": "Marketing Lead",
+        "description": "Content, docs, communications",
+        "model_tier": "light",
+        "sandbox": "off",
+        "elevated": false
+      },
+      "quality": {
+        "agent_id": "qa",
+        "title": "QA",
+        "identity_name": "QA Lead",
+        "description": "Testing, code review, compliance",
+        "model_tier": "primary",
+        "sandbox": "non-main",
+        "elevated": false
+      },
+      "hr": {
+        "agent_id": "hr",
+        "title": "HR",
+        "identity_name": "HR Lead",
+        "description": "People ops, training, agent management",
+        "model_tier": "primary",
+        "sandbox": "all",
+        "elevated": false
+      }
+    },
+    "briefing": {
+      "agent_id": "briefing",
+      "title": "Daily Briefing",
+      "identity_name": "Briefing Bot",
+      "description": "Daily news and intel briefing",
+      "model_tier": "light"
+    }
+  }
+}

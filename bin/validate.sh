@@ -3,15 +3,33 @@ set -euo pipefail
 
 # ============================================================
 #  三省六部 · 安装验证脚本
-#  用法: bash validate.sh [--dir ~/.openclaw]
+#  用法: bash validate.sh [--dir ~/.openclaw] [~/.openclaw]
 # ============================================================
 
-OPENCLAW_DIR="${1:-$HOME/.openclaw}"
+OPENCLAW_DIR="$HOME/.openclaw"
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --dir)
+      OPENCLAW_DIR="$2"
+      shift 2
+      ;;
+    --help)
+      echo "用法: bash validate.sh [--dir ~/.openclaw] [~/.openclaw]"
+      exit 0
+      ;;
+    *)
+      OPENCLAW_DIR="$1"
+      shift
+      ;;
+  esac
+done
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
 ok()   { echo -e "${GREEN}[✓]${NC} $*"; }
 warn() { echo -e "${YELLOW}[!]${NC} $*"; }
 fail() { echo -e "${RED}[✗]${NC} $*"; ERRORS=$((ERRORS + 1)); }
+summary_fail() { echo -e "${RED}[✗]${NC} $*"; }
 
 ERRORS=0
 WARNINGS=0
@@ -47,56 +65,81 @@ else
   warn ".env 不存在 (可能无 secrets 配置)"; WARNINGS=$((WARNINGS + 1))
 fi
 
-# 3. SOUL.md for all workspaces
+# 3-7. 按 openclaw.json 中的 agent 清单逐项核验
 echo ""
-echo "--- SOUL.md ---"
+echo "--- Agent 文件完整性 ---"
+
+AGENT_ROWS=()
+if [[ -f "$OPENCLAW_DIR/openclaw.json" ]]; then
+  while IFS= read -r row; do
+    AGENT_ROWS+=("$row")
+  done < <(
+    python3 - <<'PY' "$OPENCLAW_DIR/openclaw.json"
+import json, sys
+with open(sys.argv[1]) as f:
+    config = json.load(f)
+for agent in config.get("agents", {}).get("list", []):
+    print("\t".join([
+        agent["id"],
+        agent.get("workspace", ""),
+        agent.get("agentDir", ""),
+    ]))
+PY
+  )
+fi
+
 SOUL_COUNT=0
-SOUL_MISSING=0
-for ws in "$OPENCLAW_DIR"/workspace-*/; do
-  agent=$(basename "$ws" | sed 's/workspace-//')
-  if [[ -f "$ws/SOUL.md" ]]; then
+ORG_COUNT=0
+KANBAN_CFG_COUNT=0
+SCRIPT_OK=0
+TASKS_COUNT=0
+
+for row in "${AGENT_ROWS[@]}"; do
+  IFS=$'\t' read -r agent workspace agentdir <<< "$row"
+
+  if [[ -z "$workspace" || ! -d "$workspace" ]]; then
+    fail "缺少 workspace 目录: $agent (${workspace:-未配置})"
+    continue
+  fi
+  if [[ -z "$agentdir" || ! -d "$agentdir" ]]; then
+    fail "缺少 agentDir 目录: $agent (${agentdir:-未配置})"
+  fi
+
+  if [[ -f "$workspace/SOUL.md" ]]; then
     SOUL_COUNT=$((SOUL_COUNT + 1))
   else
     fail "缺少 SOUL.md: $agent"
-    SOUL_MISSING=$((SOUL_MISSING + 1))
   fi
-done
-ok "SOUL.md: $SOUL_COUNT 个 (缺失 $SOUL_MISSING 个)"
 
-# 4. ORG-STRUCTURE.md
-echo ""
-echo "--- 共享上下文 ---"
-ORG_COUNT=0
-for ws in "$OPENCLAW_DIR"/workspace-*/; do
-  [[ -f "$ws/shared-context/ORG-STRUCTURE.md" ]] && ORG_COUNT=$((ORG_COUNT + 1))
-done
-ok "ORG-STRUCTURE.md: $ORG_COUNT 个"
+  if [[ -f "$workspace/shared-context/ORG-STRUCTURE.md" ]]; then
+    ORG_COUNT=$((ORG_COUNT + 1))
+  else
+    fail "缺少 ORG-STRUCTURE.md: $agent"
+  fi
 
-# 5. kanban_config.json
-KANBAN_CFG_COUNT=0
-for ws in "$OPENCLAW_DIR"/workspace-*/; do
-  [[ -f "$ws/data/kanban_config.json" ]] && KANBAN_CFG_COUNT=$((KANBAN_CFG_COUNT + 1))
-done
-ok "kanban_config.json: $KANBAN_CFG_COUNT 个"
+  if [[ -f "$workspace/data/kanban_config.json" ]]; then
+    KANBAN_CFG_COUNT=$((KANBAN_CFG_COUNT + 1))
+  else
+    fail "缺少 kanban_config.json: $agent"
+  fi
 
-# 6. Scripts
-echo ""
-echo "--- 脚本 ---"
-SCRIPT_OK=0
-for ws in "$OPENCLAW_DIR"/workspace-*/; do
-  if [[ -f "$ws/scripts/kanban_update.py" ]] && [[ -f "$ws/scripts/file_lock.py" ]]; then
+  if [[ -f "$workspace/scripts/kanban_update.py" ]] && [[ -f "$workspace/scripts/file_lock.py" ]] && [[ -f "$workspace/scripts/refresh_live_data.py" ]]; then
     SCRIPT_OK=$((SCRIPT_OK + 1))
+  else
+    fail "缺少看板脚本: $agent"
+  fi
+
+  if [[ -f "$workspace/data/tasks_source.json" ]]; then
+    TASKS_COUNT=$((TASKS_COUNT + 1))
+  else
+    fail "缺少 tasks_source.json: $agent"
   fi
 done
-ok "看板脚本: $SCRIPT_OK 个 workspace 已部署"
 
-# 7. tasks_source.json
-echo ""
-echo "--- 看板数据 ---"
-TASKS_COUNT=0
-for ws in "$OPENCLAW_DIR"/workspace-*/; do
-  [[ -f "$ws/data/tasks_source.json" ]] && TASKS_COUNT=$((TASKS_COUNT + 1))
-done
+ok "SOUL.md: $SOUL_COUNT 个"
+ok "ORG-STRUCTURE.md: $ORG_COUNT 个"
+ok "kanban_config.json: $KANBAN_CFG_COUNT 个"
+ok "看板脚本: $SCRIPT_OK 个 workspace 已部署"
 ok "tasks_source.json: $TASKS_COUNT 个"
 
 # Summary
@@ -105,7 +148,7 @@ echo "=== 验证结果 ==="
 if [[ $ERRORS -eq 0 ]]; then
   ok "全部通过 (${WARNINGS} 个警告)"
 else
-  fail "${ERRORS} 个错误, ${WARNINGS} 个警告"
+  summary_fail "${ERRORS} 个错误, ${WARNINGS} 个警告"
 fi
 echo ""
 exit $ERRORS

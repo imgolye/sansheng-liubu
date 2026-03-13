@@ -36,7 +36,7 @@ def generate_config(theme, args):
     # Build agents list
     agents_list = []
 
-    # Router
+    # --- Router ---
     agents_list.append({
         "id": router["agent_id"],
         "default": True,
@@ -45,14 +45,15 @@ def generate_config(theme, args):
         "model": model_for(router),
         "identity": {"name": router["identity_name"]},
         "heartbeat": {"every": "30m", "target": "none", "lightContext": True,
+                       "directPolicy": "allow",
                        "prompt": "Check for active tasks. If none, reply HEARTBEAT_OK."},
         "subagents": {"allowAgents": [planner["agent_id"], dispatcher["agent_id"],
                                        reviewer["agent_id"], briefing["agent_id"]]},
-        "groupChat": {"mentionPatterns": []},
+        "groupChat": {"mentionPatterns": router.get("mentionPatterns", [])},
         "tools": {"elevated": {"enabled": True, "allowFrom": {"feishu": ["*"], "telegram": ["*"], "qqbot": ["*"]}}},
     })
 
-    # Planner
+    # --- Planner ---
     agents_list.append({
         "id": planner["agent_id"],
         "workspace": f"{oc_dir}/workspace-{planner['agent_id']}",
@@ -60,11 +61,12 @@ def generate_config(theme, args):
         "model": model_for(planner),
         "identity": {"name": planner["identity_name"]},
         "heartbeat": {"every": "30m", "target": "none", "lightContext": True,
+                       "directPolicy": "allow",
                        "prompt": "Check for active tasks (Doing/Assigned/Blocked). If none, reply HEARTBEAT_OK."},
         "subagents": {"allowAgents": [reviewer["agent_id"], dispatcher["agent_id"]]},
     })
 
-    # Reviewer
+    # --- Reviewer ---
     agents_list.append({
         "id": reviewer["agent_id"],
         "workspace": f"{oc_dir}/workspace-{reviewer['agent_id']}",
@@ -80,7 +82,7 @@ def generate_config(theme, args):
         "sandbox": {"mode": "all", "scope": "agent"},
     })
 
-    # Dispatcher
+    # --- Dispatcher ---
     agents_list.append({
         "id": dispatcher["agent_id"],
         "workspace": f"{oc_dir}/workspace-{dispatcher['agent_id']}",
@@ -91,7 +93,7 @@ def generate_config(theme, args):
         "tools": {"elevated": {"enabled": True, "allowFrom": {"feishu": ["*"], "telegram": ["*"], "qqbot": ["*"]}}},
     })
 
-    # Departments
+    # --- Departments ---
     for dep_key, dep_info in deps.items():
         agent_cfg = {
             "id": dep_info["agent_id"],
@@ -103,12 +105,37 @@ def generate_config(theme, args):
         }
         if dep_info.get("sandbox", "off") != "off":
             agent_cfg["sandbox"] = {"mode": dep_info["sandbox"], "scope": "agent"}
+
+        # Read per-department tools config from theme
+        dep_tools = dep_info.get("tools", {})
+
         if dep_info.get("elevated"):
-            agent_cfg["tools"] = {"elevated": {"enabled": True,
-                                                "allowFrom": {"feishu": ["*"], "telegram": ["*"], "qqbot": ["*"]}}}
+            # Start with elevated config
+            tools_cfg = {"elevated": {"enabled": True,
+                                       "allowFrom": {"feishu": ["*"], "telegram": ["*"], "qqbot": ["*"]}}}
+            # Merge tools.allow/deny/fs from theme on top of elevated
+            if dep_tools.get("allow"):
+                tools_cfg["allow"] = dep_tools["allow"]
+            if dep_tools.get("deny"):
+                tools_cfg["deny"] = dep_tools["deny"]
+            if dep_tools.get("fs"):
+                tools_cfg["fs"] = dep_tools["fs"]
+            agent_cfg["tools"] = tools_cfg
+        elif dep_tools:
+            # Non-elevated department with tools config from theme
+            tools_cfg = {}
+            if dep_tools.get("allow"):
+                tools_cfg["allow"] = dep_tools["allow"]
+            if dep_tools.get("deny"):
+                tools_cfg["deny"] = dep_tools["deny"]
+            if dep_tools.get("fs"):
+                tools_cfg["fs"] = dep_tools["fs"]
+            if tools_cfg:
+                agent_cfg["tools"] = tools_cfg
+
         agents_list.append(agent_cfg)
 
-    # Briefing
+    # --- Briefing ---
     agents_list.append({
         "id": briefing["agent_id"],
         "workspace": f"{oc_dir}/workspace-{briefing['agent_id']}",
@@ -118,6 +145,7 @@ def generate_config(theme, args):
         "subagents": {"allowAgents": [router["agent_id"]]},
         "tools": {
             "deny": ["Write", "Edit", "NotebookEdit"],
+            "allow": ["Read", "Glob", "Grep", "Bash", "WebFetch", "WebSearch", "sessions_send", "sessions_yield"],
             "fs": {"workspaceOnly": True},
         },
         "sandbox": {"mode": "all", "scope": "agent"},
@@ -169,6 +197,7 @@ def generate_config(theme, args):
                 "workspace": f"{oc_dir}/workspace",
                 "memorySearch": {"enabled": True, "provider": "local"},
                 "compaction": {"mode": "safeguard"},
+                "contextPruning": {"mode": "cache-ttl", "ttl": "1h"},
                 "elevatedDefault": "full",
                 "timeoutSeconds": 300,
                 "heartbeat": {"every": "30m"},
@@ -186,7 +215,23 @@ def generate_config(theme, args):
         "session": {
             "dmScope": "per-channel-peer",
             "agentToAgent": {"maxPingPongTurns": 3},
+            "threadBindings": {"enabled": True, "idleHours": 4, "maxAgeHours": 24},
+            "reset": {"mode": "daily", "atHour": 4, "idleMinutes": 120},
         },
+        "cron": {
+            "enabled": True,
+            "maxConcurrentRuns": 2,
+            "sessionRetention": "24h",
+            "runLog": {"maxBytes": "2mb", "keepLines": 2000},
+        },
+        "commands": {
+            "native": "auto",
+            "nativeSkills": "auto",
+            "text": True,
+            "restart": True,
+            "ownerDisplay": "raw",
+        },
+        "messages": {"ackReactionScope": "group-mentions"},
         "channels": channels,
         "gateway": {
             "port": 18789,
@@ -194,6 +239,7 @@ def generate_config(theme, args):
             "bind": "loopback",
             "auth": {"mode": "token", "token": "${GATEWAY_AUTH_TOKEN}"},
             "trustedProxies": ["127.0.0.1"],
+            "reload": {"mode": "hybrid", "debounceMs": 300},
         },
         "logging": {"redactSensitive": "tools"},
         "plugins": {

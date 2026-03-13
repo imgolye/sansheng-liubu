@@ -12,7 +12,8 @@
       "title": "秘书",
       "identity_name": "小秘",
       "description": "消息分拣、建任务、汇报",
-      "model_tier": "primary"
+      "model_tier": "primary",
+      "mentionPatterns": ["秘书", "小秘", "帮忙"]
     },
     "planner": {
       "agent_id": "pm",
@@ -43,7 +44,8 @@
         "description": "前后端开发",
         "model_tier": "primary",
         "sandbox": "non-main",
-        "elevated": true
+        "elevated": true,
+        "tools": {"allow": ["Read","Write","Edit","Glob","Grep","Bash","WebFetch","sessions_send","sessions_yield"], "fs": {"workspaceOnly": false}}
       },
       "operations": {
         "agent_id": "ops",
@@ -52,7 +54,8 @@
         "description": "部署上线",
         "model_tier": "primary",
         "sandbox": "non-main",
-        "elevated": true
+        "elevated": true,
+        "tools": {"allow": ["Read","Write","Edit","Glob","Grep","Bash","WebFetch","sessions_send","sessions_yield"], "fs": {"workspaceOnly": false}}
       },
       "analytics": {
         "agent_id": "analyst",
@@ -61,7 +64,8 @@
         "description": "数据看板、用户分析",
         "model_tier": "primary",
         "sandbox": "off",
-        "elevated": false
+        "elevated": false,
+        "tools": {"allow": ["Read","Write","Edit","Glob","Grep","Bash","WebFetch","sessions_send","sessions_yield"], "fs": {"workspaceOnly": true}}
       },
       "communications": {
         "agent_id": "content",
@@ -70,7 +74,8 @@
         "description": "文案、公众号、社媒",
         "model_tier": "light",
         "sandbox": "off",
-        "elevated": false
+        "elevated": false,
+        "tools": {"allow": ["Read","Write","Edit","Glob","Grep","WebFetch","WebSearch","sessions_send","sessions_yield"], "deny": ["Bash"], "fs": {"workspaceOnly": true}}
       },
       "quality": {
         "agent_id": "tester",
@@ -79,7 +84,8 @@
         "description": "功能测试、自动化",
         "model_tier": "primary",
         "sandbox": "non-main",
-        "elevated": false
+        "elevated": false,
+        "tools": {"allow": ["Read","Write","Edit","Glob","Grep","Bash","sessions_send","sessions_yield"], "fs": {"workspaceOnly": false}}
       },
       "hr": {
         "agent_id": "admin",
@@ -88,7 +94,8 @@
         "description": "招聘、培训、日常事务",
         "model_tier": "primary",
         "sandbox": "all",
-        "elevated": false
+        "elevated": false,
+        "tools": {"allow": ["Read","Write","Edit","Glob","Grep","sessions_send","sessions_yield"], "fs": {"workspaceOnly": true}}
       }
     },
     "briefing": {

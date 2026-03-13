@@ -9,6 +9,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 OPENCLAW_DIR = Path.home() / ".openclaw"
+CONFIG_FILE = OPENCLAW_DIR / "openclaw.json"
 
 # Default agents (imperial theme fallback)
 _DEFAULT_AGENTS = [
@@ -26,14 +27,22 @@ _DEFAULT_AGENTS = [
 ]
 
 
+def load_openclaw_config():
+    try:
+        with open(CONFIG_FILE) as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+CONFIG = load_openclaw_config()
+
+
 def load_agents_from_config():
     """Load agent list from openclaw.json or theme config."""
-    config_file = OPENCLAW_DIR / "openclaw.json"
     try:
-        with open(config_file) as f:
-            config = json.load(f)
         agents = []
-        for agent in config.get("agents", {}).get("list", []):
+        for agent in CONFIG.get("agents", {}).get("list", []):
             aid = agent["id"]
             name = agent.get("identity", {}).get("name", aid)
             desc = agent.get("description", "")
@@ -46,6 +55,19 @@ def load_agents_from_config():
 
 
 AGENTS = load_agents_from_config()
+
+
+def get_router_agent_id():
+    for agent in CONFIG.get("agents", {}).get("list", []):
+        if agent.get("default"):
+            return agent["id"]
+    agents = CONFIG.get("agents", {}).get("list", [])
+    if agents:
+        return agents[0]["id"]
+    return "taizi"
+
+
+ROUTER_AGENT_ID = get_router_agent_id()
 
 
 def get_gateway_health():
@@ -103,7 +125,7 @@ def format_age(dt):
 
 def get_active_tasks():
     """从 tasks_source.json 获取活跃任务"""
-    tasks_file = OPENCLAW_DIR / "workspace-taizi" / "data" / "tasks_source.json"
+    tasks_file = OPENCLAW_DIR / f"workspace-{ROUTER_AGENT_ID}" / "data" / "tasks_source.json"
     if not tasks_file.exists():
         return []
     try:
@@ -112,8 +134,8 @@ def get_active_tasks():
         active = []
         tasks = data if isinstance(data, list) else data.get("tasks", [])
         for t in tasks:
-            state = t.get("state", t.get("status", ""))
-            if state.lower() in ("doing", "assigned", "blocked", "zhongshu", "menxia"):
+            state = str(t.get("state", t.get("status", "")))
+            if state and state.lower() not in ("done", "cancelled", "canceled"):
                 active.append(t)
         return active
     except Exception:
@@ -122,12 +144,9 @@ def get_active_tasks():
 
 def get_model_info():
     """获取 agent 模型配置"""
-    config_file = OPENCLAW_DIR / "openclaw.json"
     try:
-        with open(config_file) as f:
-            config = json.load(f)
         models = {}
-        for agent in config.get("agents", {}).get("list", []):
+        for agent in CONFIG.get("agents", {}).get("list", []):
             models[agent["id"]] = agent.get("model", "default")
         return models
     except Exception:

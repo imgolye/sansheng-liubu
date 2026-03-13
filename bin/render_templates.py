@@ -72,6 +72,13 @@ _LABELS = {
         "step3_exec": "步骤 3：调用{dispatcher}执行 — 必做！",
         "step4_report": "步骤 4：回奏",
         "progress_report": "实时进展上报",
+        "yield_rule": "等待时让出回合",
+        "yield_text": "如果当前回合只是在等待子会话、人工回复或外部事件继续，调用：",
+        "yield_note": "仅用于等待后续事件，不替代 `sessions_spawn` / `sessions_send`。",
+        "yield_wait_dispatcher": "等待{dispatcher}后续回奏",
+        "yield_wait_departments": "等待各部门后续回奏",
+        "yield_wait_execution": "等待下一次执行事件",
+        "yield_wait_briefing": "等待简报后续信号",
         "anti_stuck": "防卡住检查清单",
         "anti_stuck_items": [
             "{reviewer}审完了？→ 调用{dispatcher}了吗？",
@@ -193,6 +200,13 @@ _LABELS = {
         "step3_exec": "Step 3: Call {dispatcher} to execute — MANDATORY!",
         "step4_report": "Step 4: Report back",
         "progress_report": "Real-time Progress Reporting",
+        "yield_rule": "Yield While Waiting",
+        "yield_text": "If the current turn is only waiting for a sub-session, human reply, or external event, call:",
+        "yield_note": "Use this only to wait for a follow-up event; it does not replace `sessions_spawn` / `sessions_send`.",
+        "yield_wait_dispatcher": "Waiting for {dispatcher} follow-up",
+        "yield_wait_departments": "Waiting for department follow-up",
+        "yield_wait_execution": "Waiting for the next execution event",
+        "yield_wait_briefing": "Waiting for follow-up briefing signals",
         "anti_stuck": "Anti-Stuck Checklist",
         "anti_stuck_items": [
             "{reviewer} done reviewing? → Did you call {dispatcher}?",
@@ -417,6 +431,13 @@ python3 scripts/kanban_update.py done $TASK_ID "<output>" "<summary>"
 python3 scripts/kanban_update.py progress $TASK_ID "[level] analyzing task" "analyze|draft|review|execute|report"
 ```
 
+## {L(theme, 'yield_rule')}
+{L(theme, 'yield_text')}
+```bash
+sessions_yield(message="{L(theme, 'yield_wait_dispatcher').format(dispatcher=dispatcher['title'])}")
+```
+{L(theme, 'yield_note')}
+
 ## {L(theme, 'anti_stuck')}
 {anti_stuck}
 
@@ -518,6 +539,13 @@ python3 scripts/kanban_update.py done $TASK_ID "<output>" "<summary>"
 python3 scripts/kanban_update.py progress $TASK_ID "Dispatching to departments" "analyze|deptA|deptB|aggregate|return"
 ```
 
+## {L(theme, 'yield_rule')}
+{L(theme, 'yield_text')}
+```bash
+sessions_yield(message="{L(theme, 'yield_wait_departments')}")
+```
+{L(theme, 'yield_note')}
+
 ## {L(theme, 'tone_label')}
 {theme['tone']}
 """
@@ -564,6 +592,13 @@ python3 scripts/kanban_update.py flow $TASK_ID "{dep_info['title']}" "{dispatche
 python3 scripts/kanban_update.py progress $TASK_ID "Executing XX" "analyze|design|implement|test|deliver"
 ```
 
+## {L(theme, 'yield_rule')}
+{L(theme, 'yield_text')}
+```bash
+sessions_yield(message="{L(theme, 'yield_wait_execution')}")
+```
+{L(theme, 'yield_note')}
+
 ## {L(theme, 'shared_ctx')}
 - {L(theme, 'shared_ctx_text')}
 
@@ -589,6 +624,13 @@ def render_briefing_soul(theme):
 ```bash
 python3 scripts/kanban_update.py progress $TASK_ID "Collecting news" "politics|military|economy|AI|compile"
 ```
+
+## {L(theme, 'yield_rule')}
+{L(theme, 'yield_text')}
+```bash
+sessions_yield(message="{L(theme, 'yield_wait_briefing')}")
+```
+{L(theme, 'yield_note')}
 """
 
 

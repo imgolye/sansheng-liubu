@@ -97,3 +97,7 @@ bash bin/setup.sh --theme my-team
 ## License
 
 MIT
+
+## Changelog
+
+See [CHANGELOG.md](./CHANGELOG.md) for version upgrade records.

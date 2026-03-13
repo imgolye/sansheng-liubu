@@ -12,7 +12,8 @@
       "title": "太子",
       "identity_name": "太子",
       "description": "消息分拣、任务创建、回奏",
-      "model_tier": "primary"
+      "model_tier": "primary",
+      "mentionPatterns": ["三省", "六部", "传旨", "下旨"]
     },
     "planner": {
       "agent_id": "zhongshu",
@@ -43,7 +44,8 @@
         "description": "开发/架构/代码",
         "model_tier": "primary",
         "sandbox": "non-main",
-        "elevated": true
+        "elevated": true,
+        "tools": {"allow": ["Read","Write","Edit","Glob","Grep","Bash","WebFetch","sessions_send","sessions_yield"], "fs": {"workspaceOnly": false}}
       },
       "operations": {
         "agent_id": "bingbu",
@@ -52,7 +54,8 @@
         "description": "运维/部署/安全",
         "model_tier": "primary",
         "sandbox": "non-main",
-        "elevated": true
+        "elevated": true,
+        "tools": {"allow": ["Read","Write","Edit","Glob","Grep","Bash","WebFetch","sessions_send","sessions_yield"], "fs": {"workspaceOnly": false}}
       },
       "analytics": {
         "agent_id": "hubu",
@@ -61,7 +64,8 @@
         "description": "数据/分析/报表",
         "model_tier": "primary",
         "sandbox": "off",
-        "elevated": false
+        "elevated": false,
+        "tools": {"allow": ["Read","Write","Edit","Glob","Grep","Bash","WebFetch","sessions_send","sessions_yield"], "fs": {"workspaceOnly": true}}
       },
       "communications": {
         "agent_id": "libu",
@@ -70,7 +74,8 @@
         "description": "文档/UI/对外沟通",
         "model_tier": "light",
         "sandbox": "off",
-        "elevated": false
+        "elevated": false,
+        "tools": {"allow": ["Read","Write","Edit","Glob","Grep","WebFetch","WebSearch","sessions_send","sessions_yield"], "deny": ["Bash"], "fs": {"workspaceOnly": true}}
       },
       "quality": {
         "agent_id": "xingbu",
@@ -79,7 +84,8 @@
         "description": "测试/审查/合规",
         "model_tier": "primary",
         "sandbox": "non-main",
-        "elevated": false
+        "elevated": false,
+        "tools": {"allow": ["Read","Write","Edit","Glob","Grep","Bash","sessions_send","sessions_yield"], "fs": {"workspaceOnly": false}}
       },
       "hr": {
         "agent_id": "libu_hr",
@@ -88,7 +94,8 @@
         "description": "人事/培训/Agent管理",
         "model_tier": "primary",
         "sandbox": "all",
-        "elevated": false
+        "elevated": false,
+        "tools": {"allow": ["Read","Write","Edit","Glob","Grep","sessions_send","sessions_yield"], "fs": {"workspaceOnly": true}}
       }
     },
     "briefing": {

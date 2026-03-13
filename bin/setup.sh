@@ -6,7 +6,7 @@ set -euo pipefail
 #  用法: bash setup.sh [--theme imperial|corporate|startup]
 # ============================================================
 
-VERSION="1.0.0"
+VERSION="1.1.0"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 TEMPLATES_DIR="$PROJECT_DIR/templates"
@@ -16,6 +16,7 @@ THEMES_DIR="$PROJECT_DIR/themes"
 THEME="imperial"
 OPENCLAW_DIR="$HOME/.openclaw"
 TASK_PREFIX="JJC"
+PREFIX_SET=0
 
 # ---------- 颜色 ----------
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; NC='\033[0m'
@@ -29,7 +30,7 @@ while [[ $# -gt 0 ]]; do
   case $1 in
     --theme)  THEME="$2"; shift 2 ;;
     --dir)    OPENCLAW_DIR="$2"; shift 2 ;;
-    --prefix) TASK_PREFIX="$2"; shift 2 ;;
+    --prefix) TASK_PREFIX="$2"; PREFIX_SET=1; shift 2 ;;
     --help)   echo "用法: setup.sh [--theme imperial|corporate|startup] [--dir ~/.openclaw] [--prefix JJC]"; exit 0 ;;
     *)        warn "未知参数: $1"; shift ;;
   esac
@@ -69,11 +70,14 @@ print(f'ROLE_ROUTER=\"{roles[\"router\"][\"title\"]}\"')
 print(f'ROLE_PLANNER=\"{roles[\"planner\"][\"title\"]}\"')
 print(f'ROLE_REVIEWER=\"{roles[\"reviewer\"][\"title\"]}\"')
 print(f'ROLE_DISPATCHER=\"{roles[\"dispatcher\"][\"title\"]}\"')
+print(f'ROLE_BRIEFING=\"{roles[\"briefing\"][\"title\"]}\"')
 print(f'ROLE_OWNER=\"{t[\"owner_title\"]}\"')
+print(f'THEME_TASK_PREFIX=\"{t.get(\"task_prefix\", \"JJC\")}\"')
 print(f'AGENT_ROUTER=\"{roles[\"router\"][\"agent_id\"]}\"')
 print(f'AGENT_PLANNER=\"{roles[\"planner\"][\"agent_id\"]}\"')
 print(f'AGENT_REVIEWER=\"{roles[\"reviewer\"][\"agent_id\"]}\"')
 print(f'AGENT_DISPATCHER=\"{roles[\"dispatcher\"][\"agent_id\"]}\"')
+print(f'AGENT_BRIEFING=\"{roles[\"briefing\"][\"agent_id\"]}\"')
 # departments
 deps = roles.get('departments', {})
 dep_ids = []
@@ -85,7 +89,11 @@ print(f'DEP_IDS=({\" \".join(dep_ids)})')
 print(f'DEP_TITLES=({\" \".join([repr(x) for x in dep_titles])})')
 ")"
 
-ALL_AGENTS=("$AGENT_ROUTER" "$AGENT_PLANNER" "$AGENT_REVIEWER" "$AGENT_DISPATCHER" "${DEP_IDS[@]}")
+if [[ "$PREFIX_SET" -eq 0 ]]; then
+  TASK_PREFIX="$THEME_TASK_PREFIX"
+fi
+
+ALL_AGENTS=("$AGENT_ROUTER" "$AGENT_PLANNER" "$AGENT_REVIEWER" "$AGENT_DISPATCHER" "$AGENT_BRIEFING" "${DEP_IDS[@]}")
 
 # ---------- 交互式配置 ----------
 echo "=== 频道配置 ==="

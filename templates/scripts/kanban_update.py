@@ -77,15 +77,39 @@ _AGENT_LABELS = _kanban_cfg['agent_labels'] if _kanban_cfg else _DEFAULT_AGENT_L
 _OWNER_TITLE = _kanban_cfg['owner_title'] if _kanban_cfg else '皇上'
 _TASK_PREFIX = _kanban_cfg['task_prefix'] if _kanban_cfg else 'JJC'
 
-# Localized labels (determined by whether config exists and language)
-L_DONE = 'Task completed' if (_kanban_cfg and _kanban_cfg.get('owner_title', '') == _kanban_cfg.get('owner_title', '')) else '任务已完成'
-# Simple heuristic: if owner_title is ASCII, use English
+# Localized labels — heuristic: if owner_title is ASCII → English, else Chinese
 if _kanban_cfg and all(ord(c) < 128 for c in _kanban_cfg.get('owner_title', 'x')):
+    # English
     L_DONE = 'Task completed'
     L_ORDER_ISSUED = 'Order issued, awaiting {org}'
+    L_REJECT_CREATE = 'Rejected creating {task_id}: {reason}'
+    L_KANBAN_REJECT = '[Kanban] Rejected: {reason}'
+    L_TASK_CLOSED = 'Task {task_id} already closed (state={state}), cannot overwrite'
+    L_KANBAN_CLOSED = '[Kanban] Task {task_id} already closed (state={state}), cannot overwrite'
+    L_TASK_EXISTS = 'Task {task_id} already exists (state={state}), will be overwritten'
+    L_TASK_NOT_FOUND = 'Task {task_id} not found'
+    L_ARG_ERROR = 'Error: "{cmd}" requires at least {min} arguments, got {actual}'
+    L_TITLE_TOO_SHORT = 'Title too short ({length}<{min_len} chars)'
+    L_TITLE_JUNK = 'Title "{t}" is not a valid task'
+    L_TITLE_PUNCT_ONLY = 'Title contains only punctuation'
+    L_TITLE_LOOKS_PATH = 'Title looks like a file path, please summarize the task'
+    L_TITLE_EMPTY = 'Title is empty after sanitization'
 else:
+    # Chinese
     L_DONE = '任务已完成'
     L_ORDER_ISSUED = '已下旨，等待{org}接旨'
+    L_REJECT_CREATE = '⚠️ 拒绝创建 {task_id}：{reason}'
+    L_KANBAN_REJECT = '[看板] 拒绝创建：{reason}'
+    L_TASK_CLOSED = '⚠️ 任务 {task_id} 已完结 (state={state})，不可覆盖'
+    L_KANBAN_CLOSED = '[看板] 任务 {task_id} 已完结 (state={state})，不可覆盖'
+    L_TASK_EXISTS = '任务 {task_id} 已存在 (state={state})，将被覆盖'
+    L_TASK_NOT_FOUND = '任务 {task_id} 不存在'
+    L_ARG_ERROR = '错误："{cmd}" 命令至少需要 {min} 个参数，实际 {actual} 个'
+    L_TITLE_TOO_SHORT = '标题过短（{length}<{min_len}字），疑似非旨意'
+    L_TITLE_JUNK = '标题 "{t}" 不是有效旨意'
+    L_TITLE_PUNCT_ONLY = '标题只有标点符号'
+    L_TITLE_LOOKS_PATH = '标题看起来像文件路径，请用中文概括任务'
+    L_TITLE_EMPTY = '标题清洗后为空'
 
 MAX_PROGRESS_LOG = 100  # 单任务最大进展日志条数
 
@@ -303,15 +327,18 @@ def cmd_next_id(prefix=None, date_str=None):
 def cmd_state(task_id, new_state, now_text=None):
     """更新任务状态（原子操作）"""
     old_state = [None]
+    found = [False]
     def modifier(tasks):
         t = find_task(tasks, task_id)
         if not t:
             log.error(f'任务 {task_id} 不存在')
             return tasks
+        found[0] = True
         old_state[0] = t['state']
         t['state'] = new_state
         t['status'] = new_state
-        if new_state in STATE_ORG_MAP:
+        # 仅对明确的流转节点更新负责部门；Doing/Done/Blocked 需保留真实执行方
+        if new_state in _STATE_AGENT_MAP and new_state in STATE_ORG_MAP:
             t['org'] = STATE_ORG_MAP[new_state]
         if now_text:
             t['now'] = now_text
@@ -319,35 +346,47 @@ def cmd_state(task_id, new_state, now_text=None):
         t['updatedAt'] = now_iso()
         return tasks
     atomic_json_update(TASKS_FILE, modifier, [])
+    if not found[0]:
+        print(L_TASK_NOT_FOUND.format(task_id=task_id), flush=True)
+        return 1
     save(load())  # trigger refresh
     log.info(f'✅ {task_id} 状态更新: {old_state[0]} → {new_state}')
+    return 0
 
 
 def cmd_flow(task_id, from_dept, to_dept, remark):
     """添加流转记录（原子操作）"""
     clean_remark = _sanitize_remark(remark)
+    found = [False]
     def modifier(tasks):
         t = find_task(tasks, task_id)
         if not t:
             log.error(f'任务 {task_id} 不存在')
             return tasks
+        found[0] = True
         t.setdefault('flow_log', []).append({
             "at": now_iso(), "from": from_dept, "to": to_dept, "remark": clean_remark
         })
         t['updatedAt'] = now_iso()
         return tasks
     atomic_json_update(TASKS_FILE, modifier, [])
+    if not found[0]:
+        print(L_TASK_NOT_FOUND.format(task_id=task_id), flush=True)
+        return 1
     save(load())  # trigger refresh
     log.info(f'✅ {task_id} 流转记录: {from_dept} → {to_dept}')
+    return 0
 
 
 def cmd_done(task_id, output_path='', summary=''):
     """标记任务完成（原子操作）"""
+    found = [False]
     def modifier(tasks):
         t = find_task(tasks, task_id)
         if not t:
             log.error(f'任务 {task_id} 不存在')
             return tasks
+        found[0] = True
         t['state'] = 'Done'
         t['status'] = 'Done'
         t['output'] = output_path
@@ -360,17 +399,23 @@ def cmd_done(task_id, output_path='', summary=''):
         t['updatedAt'] = now_iso()
         return tasks
     atomic_json_update(TASKS_FILE, modifier, [])
+    if not found[0]:
+        print(L_TASK_NOT_FOUND.format(task_id=task_id), flush=True)
+        return 1
     save(load())  # trigger refresh
     log.info(f'✅ {task_id} 已完成')
+    return 0
 
 
 def cmd_block(task_id, reason):
     """标记阻塞（原子操作）"""
+    found = [False]
     def modifier(tasks):
         t = find_task(tasks, task_id)
         if not t:
             log.error(f'任务 {task_id} 不存在')
             return tasks
+        found[0] = True
         t['state'] = 'Blocked'
         t['status'] = 'Blocked'
         t['block'] = reason
@@ -378,8 +423,12 @@ def cmd_block(task_id, reason):
         t['updatedAt'] = now_iso()
         return tasks
     atomic_json_update(TASKS_FILE, modifier, [])
+    if not found[0]:
+        print(L_TASK_NOT_FOUND.format(task_id=task_id), flush=True)
+        return 1
     save(load())  # trigger refresh
     log.warning(f'⚠️ {task_id} 已阻塞: {reason}')
+    return 0
 
 
 def cmd_progress(task_id, now_text, todos_pipe='', tokens=0, cost=0.0, elapsed=0):
@@ -433,11 +482,13 @@ def cmd_progress(task_id, now_text, todos_pipe='', tokens=0, cost=0.0, elapsed=0
 
     done_cnt = [0]
     total_cnt = [0]
+    found = [False]
     def modifier(tasks):
         t = find_task(tasks, task_id)
         if not t:
             log.error(f'任务 {task_id} 不存在')
             return tasks
+        found[0] = True
         t['now'] = clean
         t['currentUpdate'] = clean
         if parsed_todos is not None:
@@ -468,11 +519,15 @@ def cmd_progress(task_id, now_text, todos_pipe='', tokens=0, cost=0.0, elapsed=0
         total_cnt[0] = len(t.get('todos', []))
         return tasks
     atomic_json_update(TASKS_FILE, modifier, [])
+    if not found[0]:
+        print(L_TASK_NOT_FOUND.format(task_id=task_id), flush=True)
+        return 1
     save(load())  # trigger refresh
     res_info = ''
     if tokens or cost or elapsed:
         res_info = f' [res: {tokens}tok/${cost:.4f}/{elapsed}s]'
     log.info(f'📡 {task_id} 进展: {clean[:40]}... [{done_cnt[0]}/{total_cnt[0]}]{res_info}')
+    return 0
 
 def cmd_todo(task_id, todo_id, title, status='not-started', detail=''):
     """添加或更新子任务 todo（原子操作）
@@ -484,11 +539,13 @@ def cmd_todo(task_id, todo_id, title, status='not-started', detail=''):
     if status not in ('not-started', 'in-progress', 'completed'):
         status = 'not-started'
     result_info = [0, 0]
+    found = [False]
     def modifier(tasks):
         t = find_task(tasks, task_id)
         if not t:
             log.error(f'任务 {task_id} 不存在')
             return tasks
+        found[0] = True
         if 'todos' not in t:
             t['todos'] = []
         existing = next((td for td in t['todos'] if str(td.get('id')) == str(todo_id)), None)
@@ -508,8 +565,12 @@ def cmd_todo(task_id, todo_id, title, status='not-started', detail=''):
         result_info[1] = len(t['todos'])
         return tasks
     atomic_json_update(TASKS_FILE, modifier, [])
+    if not found[0]:
+        print(L_TASK_NOT_FOUND.format(task_id=task_id), flush=True)
+        return 1
     save(load())  # trigger refresh
     log.info(f'✅ {task_id} todo [{result_info[0]}/{result_info[1]}]: {todo_id} → {status}')
+    return 0
 
 _CMD_MIN_ARGS = {
     'create': 6, 'state': 3, 'flow': 5, 'done': 2, 'block': 3, 'todo': 4, 'progress': 3, 'next-id': 1,
@@ -522,7 +583,7 @@ if __name__ == '__main__':
         sys.exit(0)
     cmd = args[0]
     if cmd in _CMD_MIN_ARGS and len(args) < _CMD_MIN_ARGS[cmd]:
-        print(f'错误："{cmd}" 命令至少需要 {_CMD_MIN_ARGS[cmd]} 个参数，实际 {len(args)} 个')
+        print(L_ARG_ERROR.format(cmd=cmd, min=_CMD_MIN_ARGS[cmd], actual=len(args)))
         print(__doc__)
         sys.exit(1)
     if cmd == 'create':
@@ -530,13 +591,13 @@ if __name__ == '__main__':
     elif cmd == 'next-id':
         sys.exit(cmd_next_id(args[1] if len(args) > 1 else None, args[2] if len(args) > 2 else None))
     elif cmd == 'state':
-        cmd_state(args[1], args[2], args[3] if len(args)>3 else None)
+        sys.exit(cmd_state(args[1], args[2], args[3] if len(args)>3 else None))
     elif cmd == 'flow':
-        cmd_flow(args[1], args[2], args[3], args[4])
+        sys.exit(cmd_flow(args[1], args[2], args[3], args[4]))
     elif cmd == 'done':
-        cmd_done(args[1], args[2] if len(args)>2 else '', args[3] if len(args)>3 else '')
+        sys.exit(cmd_done(args[1], args[2] if len(args)>2 else '', args[3] if len(args)>3 else ''))
     elif cmd == 'block':
-        cmd_block(args[1], args[2])
+        sys.exit(cmd_block(args[1], args[2]))
     elif cmd == 'todo':
         # 解析可选 --detail 参数
         todo_pos = []
@@ -547,13 +608,13 @@ if __name__ == '__main__':
                 todo_detail = args[ti + 1]; ti += 2
             else:
                 todo_pos.append(args[ti]); ti += 1
-        cmd_todo(
+        sys.exit(cmd_todo(
             todo_pos[0] if len(todo_pos) > 0 else '',
             todo_pos[1] if len(todo_pos) > 1 else '',
             todo_pos[2] if len(todo_pos) > 2 else '',
             todo_pos[3] if len(todo_pos) > 3 else 'not-started',
             detail=todo_detail,
-        )
+        ))
     elif cmd == 'progress':
         # 解析可选 --tokens/--cost/--elapsed 参数
         pos_args = []
@@ -568,14 +629,14 @@ if __name__ == '__main__':
                 kw['elapsed'] = args[i + 1]; i += 2
             else:
                 pos_args.append(args[i]); i += 1
-        cmd_progress(
+        sys.exit(cmd_progress(
             pos_args[0] if len(pos_args) > 0 else '',
             pos_args[1] if len(pos_args) > 1 else '',
             pos_args[2] if len(pos_args) > 2 else '',
             tokens=kw.get('tokens', 0),
             cost=kw.get('cost', 0.0),
             elapsed=kw.get('elapsed', 0),
-        )
+        ))
     else:
         print(__doc__)
         sys.exit(1)

@@ -12,7 +12,8 @@
       "title": "Executive Assistant",
       "identity_name": "EA",
       "description": "Message routing, task creation, status reporting",
-      "model_tier": "primary"
+      "model_tier": "primary",
+      "mentionPatterns": ["assistant", "EA", "help"]
     },
     "planner": {
       "agent_id": "vp_strategy",
@@ -43,7 +44,8 @@
         "description": "Development, architecture, code",
         "model_tier": "primary",
         "sandbox": "non-main",
-        "elevated": true
+        "elevated": true,
+        "tools": {"allow": ["Read","Write","Edit","Glob","Grep","Bash","WebFetch","sessions_send","sessions_yield"], "fs": {"workspaceOnly": false}}
       },
       "operations": {
         "agent_id": "devops",
@@ -52,7 +54,8 @@
         "description": "Infrastructure, deployment, security",
         "model_tier": "primary",
         "sandbox": "non-main",
-        "elevated": true
+        "elevated": true,
+        "tools": {"allow": ["Read","Write","Edit","Glob","Grep","Bash","WebFetch","sessions_send","sessions_yield"], "fs": {"workspaceOnly": false}}
       },
       "analytics": {
         "agent_id": "data_team",
@@ -61,7 +64,8 @@
         "description": "Analytics, reporting, metrics",
         "model_tier": "primary",
         "sandbox": "off",
-        "elevated": false
+        "elevated": false,
+        "tools": {"allow": ["Read","Write","Edit","Glob","Grep","Bash","WebFetch","sessions_send","sessions_yield"], "fs": {"workspaceOnly": true}}
       },
       "communications": {
         "agent_id": "marketing",
@@ -70,7 +74,8 @@
         "description": "Content, docs, communications",
         "model_tier": "light",
         "sandbox": "off",
-        "elevated": false
+        "elevated": false,
+        "tools": {"allow": ["Read","Write","Edit","Glob","Grep","WebFetch","WebSearch","sessions_send","sessions_yield"], "deny": ["Bash"], "fs": {"workspaceOnly": true}}
       },
       "quality": {
         "agent_id": "qa",
@@ -79,7 +84,8 @@
         "description": "Testing, code review, compliance",
         "model_tier": "primary",
         "sandbox": "non-main",
-        "elevated": false
+        "elevated": false,
+        "tools": {"allow": ["Read","Write","Edit","Glob","Grep","Bash","sessions_send","sessions_yield"], "fs": {"workspaceOnly": false}}
       },
       "hr": {
         "agent_id": "hr",
@@ -88,7 +94,8 @@
         "description": "People ops, training, agent management",
         "model_tier": "primary",
         "sandbox": "all",
-        "elevated": false
+        "elevated": false,
+        "tools": {"allow": ["Read","Write","Edit","Glob","Grep","sessions_send","sessions_yield"], "fs": {"workspaceOnly": true}}
       }
     },
     "briefing": {

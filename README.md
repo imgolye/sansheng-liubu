@@ -24,7 +24,7 @@
 ## 快速开始
 
 ```bash
-git clone https://github.com/yourname/sansheng-liubu.git
+git clone https://github.com/imgolye/sansheng-liubu.git
 cd sansheng-liubu
 bash bin/setup.sh
 bash bin/validate.sh   # 验证安装

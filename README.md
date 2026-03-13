@@ -75,6 +75,22 @@ openclaw gateway health
 python3 ~/.openclaw/workspace-taizi/scripts/health_dashboard.py
 ```
 
+如果你希望自动识别当前主题的路由 agent，可以直接运行：
+
+```bash
+ROUTER_ID=$(python3 - <<'PY'
+import json
+from pathlib import Path
+
+config = json.loads((Path.home() / ".openclaw" / "openclaw.json").read_text())
+agents = config.get("agents", {}).get("list", [])
+router_id = next((a["id"] for a in agents if a.get("default")), agents[0]["id"] if agents else "taizi")
+print(router_id)
+PY
+)
+python3 ~/.openclaw/workspace-${ROUTER_ID}/scripts/health_dashboard.py
+```
+
 如果你使用的是 `startup` 或 `corporate` 主题，请把 `workspace-taizi` 替换成对应路由 agent 的 workspace，例如：
 - `startup` → `workspace-secretary`
 - `corporate` → `workspace-assistant`

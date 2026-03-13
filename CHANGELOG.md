@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.2.0 - 2026-03-14
+
+### Added
+- Added `bin/switch_theme.py` and `bin/switch_theme.sh` so existing installations can switch themes without reinstalling.
+- Added theme schema validation and shared migration helpers in `bin/theme_utils.py`.
+
+### Changed
+- Preserved existing channel config, models, memory search settings, and task prefixes when regenerating `openclaw.json`.
+- Preserved existing secrets and gateway token when rerunning `setup.sh`.
+- Tightened default elevated allowlists so new installs no longer inherit wildcard access by default.
+
+### Fixed
+- Replaced the old `eval`-based theme loading in `setup.sh` with validated Python parsing.
+- Deployed `health_dashboard.py` to every workspace and updated validation to check it.
+- Made `health_dashboard.py` support `--dir`, `OPENCLAW_DIR`, and per-workspace auto-detection.
+- Replaced the Unix-only `fcntl` JSON lock with a cross-platform lock implementation.
+- Migrated task boards, agent session directories, and workspace artifacts across themes when switching.
+
 ## 1.1.0 - 2026-03-14
 
 ### Changed

@@ -31,9 +31,14 @@ bash bin/validate.sh   # 验证安装
 ```
 
 安装向导会交互式询问：
-1. 选择主题（皇帝朝廷 / 现代企业 / 创业团队）
-2. 配置频道（飞书 / Telegram / QQ）
-3. 选择模型
+1. 配置频道（飞书 / Telegram / QQ）
+2. 选择模型
+
+主题通过 `--theme` 指定，默认是 `imperial`：
+
+```bash
+bash bin/setup.sh --theme corporate
+```
 
 ## 5 分钟上手
 
@@ -131,6 +136,32 @@ python3 ~/.openclaw/workspace-${ROUTER_ID}/scripts/health_dashboard.py
 bash bin/setup.sh --theme corporate
 ```
 
+## 运行中切换主题
+
+已有安装不需要重装，可以直接切换：
+
+```bash
+bash bin/switch_theme.sh --theme startup
+```
+
+如果你的 OpenClaw 不在默认目录：
+
+```bash
+bash bin/switch_theme.sh --theme corporate --dir /path/to/.openclaw
+```
+
+切换时会：
+- 备份当前 `openclaw.json` 和 `.env` 到 `backups/theme-switch-*`
+- 保留现有频道配置、模型配置、Gateway token 和任务前缀
+- 迁移任务看板、Agent 会话目录以及 workspace 里的非模板文件
+- 重新生成新主题的 `SOUL.md`、`kanban_config.json` 和 `openclaw.json`
+
+如果你希望切换时顺便改任务前缀，可以加：
+
+```bash
+bash bin/switch_theme.sh --theme corporate --task-prefix TASK
+```
+
 ## 核心特性
 
 - **任务分级 S/A/B**：重大任务走审议流程，简单任务直达执行
@@ -147,8 +178,11 @@ bash bin/setup.sh --theme corporate
 sansheng-liubu/
 ├── bin/
 │   ├── setup.sh              # 交互式安装脚本
+│   ├── switch_theme.sh       # 已安装环境切换主题
+│   ├── switch_theme.py       # 主题切换与迁移逻辑
 │   ├── render_templates.py   # SOUL.md / kanban_config / HEARTBEAT 渲染
 │   ├── generate_config.py    # openclaw.json 生成
+│   ├── theme_utils.py        # 主题 schema 校验 / 迁移辅助
 │   └── validate.sh           # 安装后验证
 ├── templates/
 │   └── scripts/              # 运行时脚本（部署到每个 workspace）

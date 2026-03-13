@@ -5,10 +5,7 @@ import argparse
 import json
 from pathlib import Path
 
-
-def load_theme(path):
-    with open(path) as f:
-        return json.load(f)
+from theme_utils import load_theme
 
 
 # ── i18n helper ──────────────────────────────────────────────
@@ -767,17 +764,8 @@ def generate_kanban_config(theme):
     }
 
 
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--theme", required=True)
-    parser.add_argument("--openclaw-dir", required=True)
-    parser.add_argument("--primary-model", default="openai-codex/gpt-5.4")
-    parser.add_argument("--light-model", default="zai/glm-5")
-    parser.add_argument("--task-prefix", default="JJC")
-    args = parser.parse_args()
-
-    theme = load_theme(args.theme)
-    oc_dir = Path(args.openclaw_dir)
+def render_theme(theme, openclaw_dir, task_prefix):
+    oc_dir = Path(openclaw_dir)
     r = theme["roles"]
 
     def write_file(agent_id, filename, content):
@@ -786,8 +774,8 @@ def main():
         (ws / filename).write_text(content)
 
     # SOUL.md for each agent
-    write_file(r["router"]["agent_id"], "SOUL.md", render_router_soul(theme, args.task_prefix))
-    write_file(r["planner"]["agent_id"], "SOUL.md", render_planner_soul(theme, args.task_prefix))
+    write_file(r["router"]["agent_id"], "SOUL.md", render_router_soul(theme, task_prefix))
+    write_file(r["planner"]["agent_id"], "SOUL.md", render_planner_soul(theme, task_prefix))
     write_file(r["reviewer"]["agent_id"], "SOUL.md", render_reviewer_soul(theme))
     write_file(r["dispatcher"]["agent_id"], "SOUL.md", render_dispatcher_soul(theme))
 
@@ -824,6 +812,19 @@ def main():
         write_file(agent_id, "HEARTBEAT.md", heartbeat_md)
 
     print(f"Rendered {len(all_agents)} SOUL.md + shared-context + kanban_config.json + HEARTBEAT.md")
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--theme", required=True)
+    parser.add_argument("--openclaw-dir", required=True)
+    parser.add_argument("--primary-model", default="openai-codex/gpt-5.4")
+    parser.add_argument("--light-model", default="zai/glm-5")
+    parser.add_argument("--task-prefix", default="JJC")
+    args = parser.parse_args()
+
+    theme = load_theme(args.theme)
+    render_theme(theme, args.openclaw_dir, args.task_prefix)
 
 
 if __name__ == "__main__":

@@ -1,44 +1,78 @@
 """
-文件锁工具 — 防止多进程并发读写 JSON 文件导致数据丢失。
+跨平台 JSON 文件锁工具。
 
-用法:
-    from file_lock import atomic_json_update, atomic_json_read
-
-    # 原子读取
-    data = atomic_json_read(path, default=[])
-
-    # 原子更新（读 → 修改 → 写回，全程持锁）
-    def modifier(tasks):
-        tasks.append(new_task)
-        return tasks 
-    atomic_json_update(path, modifier, default=[])
+使用 O_CREAT | O_EXCL 创建锁文件，兼容 macOS / Linux / Windows。
+异常退出留下的陈旧锁会在超时后自动清理。
 """
-import fcntl
+
+from __future__ import annotations
+
 import json
 import os
 import pathlib
 import tempfile
+import time
+from contextlib import contextmanager
 from typing import Any, Callable
 
 
+LOCK_TIMEOUT_SECONDS = float(os.environ.get("KANBAN_LOCK_TIMEOUT_SECONDS", "10"))
+LOCK_STALE_SECONDS = float(os.environ.get("KANBAN_LOCK_STALE_SECONDS", "300"))
+LOCK_RETRY_SECONDS = float(os.environ.get("KANBAN_LOCK_RETRY_SECONDS", "0.1"))
+
+
 def _lock_path(path: pathlib.Path) -> pathlib.Path:
-    return path.parent / (path.name + '.lock')
+    return path.parent / (path.name + ".lock")
+
+
+def _safe_unlink(path: pathlib.Path) -> None:
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        return
+
+
+@contextmanager
+def _exclusive_lock(path: pathlib.Path):
+    lock_file = _lock_path(path)
+    lock_file.parent.mkdir(parents=True, exist_ok=True)
+    deadline = time.monotonic() + LOCK_TIMEOUT_SECONDS
+    fd = None
+
+    while fd is None:
+        try:
+            fd = os.open(str(lock_file), os.O_CREAT | os.O_EXCL | os.O_RDWR)
+            payload = {"pid": os.getpid(), "createdAt": time.time()}
+            os.write(fd, json.dumps(payload).encode("utf-8"))
+            break
+        except FileExistsError:
+            try:
+                age = time.time() - lock_file.stat().st_mtime
+            except FileNotFoundError:
+                continue
+            if age > LOCK_STALE_SECONDS:
+                _safe_unlink(lock_file)
+                continue
+            if time.monotonic() >= deadline:
+                raise TimeoutError(f"Timed out waiting for lock: {lock_file}")
+            time.sleep(LOCK_RETRY_SECONDS)
+
+    try:
+        yield
+    finally:
+        if fd is not None:
+            os.close(fd)
+        _safe_unlink(lock_file)
 
 
 def atomic_json_read(path: pathlib.Path, default: Any = None) -> Any:
     """持锁读取 JSON 文件。"""
-    lock_file = _lock_path(path)
-    lock_file.parent.mkdir(parents=True, exist_ok=True)
-    fd = os.open(str(lock_file), os.O_CREAT | os.O_RDWR)
-    try:
-        fcntl.flock(fd, fcntl.LOCK_SH)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with _exclusive_lock(path):
         try:
-            return json.loads(path.read_text()) if path.exists() else default
+            return json.loads(path.read_text(encoding="utf-8")) if path.exists() else default
         except Exception:
             return default
-    finally:
-        fcntl.flock(fd, fcntl.LOCK_UN)
-        os.close(fd)
 
 
 def atomic_json_update(
@@ -49,56 +83,40 @@ def atomic_json_update(
     """
     原子地读取 → 修改 → 写回 JSON 文件。
     modifier(data) 应返回修改后的数据。
-    使用临时文件 + rename 保证写入原子性。
     """
-    lock_file = _lock_path(path)
-    lock_file.parent.mkdir(parents=True, exist_ok=True)
-    fd = os.open(str(lock_file), os.O_CREAT | os.O_RDWR)
-    try:
-        fcntl.flock(fd, fcntl.LOCK_EX)
-        # Read
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with _exclusive_lock(path):
         try:
-            data = json.loads(path.read_text()) if path.exists() else default
+            data = json.loads(path.read_text(encoding="utf-8")) if path.exists() else default
         except Exception:
             data = default
-        # Modify
+
         result = modifier(data)
-        # Atomic write via temp file + rename
+
         tmp_fd, tmp_path = tempfile.mkstemp(
-            dir=str(path.parent), suffix='.tmp', prefix=path.stem + '_'
+            dir=str(path.parent), suffix=".tmp", prefix=path.stem + "_"
         )
         try:
-            with os.fdopen(tmp_fd, 'w') as f:
+            with os.fdopen(tmp_fd, "w", encoding="utf-8") as f:
                 json.dump(result, f, ensure_ascii=False, indent=2)
             os.replace(tmp_path, str(path))
         except Exception:
-            os.unlink(tmp_path)
+            _safe_unlink(pathlib.Path(tmp_path))
             raise
         return result
-    finally:
-        fcntl.flock(fd, fcntl.LOCK_UN)
-        os.close(fd)
 
 
 def atomic_json_write(path: pathlib.Path, data: Any) -> None:
-    """原子写入 JSON 文件（持排他锁 + tmpfile rename）。
-    直接写入，不读取现有内容（避免 atomic_json_update 的多余读开销）。
-    """
-    lock_file = _lock_path(path)
-    lock_file.parent.mkdir(parents=True, exist_ok=True)
-    fd = os.open(str(lock_file), os.O_CREAT | os.O_RDWR)
-    try:
-        fcntl.flock(fd, fcntl.LOCK_EX)
+    """原子写入 JSON 文件。"""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with _exclusive_lock(path):
         tmp_fd, tmp_path = tempfile.mkstemp(
-            dir=str(path.parent), suffix='.tmp', prefix=path.stem + '_'
+            dir=str(path.parent), suffix=".tmp", prefix=path.stem + "_"
         )
         try:
-            with os.fdopen(tmp_fd, 'w') as f:
+            with os.fdopen(tmp_fd, "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
             os.replace(tmp_path, str(path))
         except Exception:
-            os.unlink(tmp_path)
+            _safe_unlink(pathlib.Path(tmp_path))
             raise
-    finally:
-        fcntl.flock(fd, fcntl.LOCK_UN)
-        os.close(fd)

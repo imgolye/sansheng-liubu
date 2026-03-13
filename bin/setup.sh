@@ -6,7 +6,7 @@ set -euo pipefail
 #  用法: bash setup.sh [--theme imperial|corporate|startup]
 # ============================================================
 
-VERSION="1.1.0"
+VERSION="1.2.0"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 TEMPLATES_DIR="$PROJECT_DIR/templates"
@@ -17,6 +17,7 @@ THEME="imperial"
 OPENCLAW_DIR="$HOME/.openclaw"
 TASK_PREFIX="JJC"
 PREFIX_SET=0
+ENV_FILE=""
 
 # ---------- 颜色 ----------
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; NC='\033[0m'
@@ -54,46 +55,63 @@ info "主题: $THEME"
 info "安装目录: $OPENCLAW_DIR"
 echo ""
 
+ENV_FILE="$OPENCLAW_DIR/.env"
+read_env_value() {
+  local env_path="$1"
+  local key="$2"
+  [[ -f "$env_path" ]] || return 0
+  python3 - "$env_path" "$key" <<'PY'
+import sys
+from pathlib import Path
+
+env_path = Path(sys.argv[1])
+key = sys.argv[2]
+for line in env_path.read_text(encoding="utf-8").splitlines():
+    if not line or line.lstrip().startswith("#") or "=" not in line:
+        continue
+    k, v = line.split("=", 1)
+    if k == key:
+        print(v)
+        break
+PY
+}
+
+EXISTING_FEISHU_SECRET="$(read_env_value "$ENV_FILE" "FEISHU_APP_SECRET")"
+EXISTING_TG_TOKEN="$(read_env_value "$ENV_FILE" "TELEGRAM_BOT_TOKEN")"
+EXISTING_QQ_SECRET="$(read_env_value "$ENV_FILE" "QQBOT_CLIENT_SECRET")"
+EXISTING_GATEWAY_TOKEN="$(read_env_value "$ENV_FILE" "GATEWAY_AUTH_TOKEN")"
+
 # ---------- 加载主题 ----------
 THEME_FILE="$THEMES_DIR/$THEME/theme.json"
 if [[ ! -f "$THEME_FILE" ]]; then
   error "主题文件不存在: $THEME_FILE (可选: imperial, corporate, startup)"
 fi
 
-# 用 python3 解析主题 JSON
-eval "$(python3 -c "
-import json, sys
-with open('$THEME_FILE') as f:
-    t = json.load(f)
-roles = t['roles']
-print(f'ROLE_ROUTER=\"{roles[\"router\"][\"title\"]}\"')
-print(f'ROLE_PLANNER=\"{roles[\"planner\"][\"title\"]}\"')
-print(f'ROLE_REVIEWER=\"{roles[\"reviewer\"][\"title\"]}\"')
-print(f'ROLE_DISPATCHER=\"{roles[\"dispatcher\"][\"title\"]}\"')
-print(f'ROLE_BRIEFING=\"{roles[\"briefing\"][\"title\"]}\"')
-print(f'ROLE_OWNER=\"{t[\"owner_title\"]}\"')
-print(f'THEME_TASK_PREFIX=\"{t.get(\"task_prefix\", \"JJC\")}\"')
-print(f'AGENT_ROUTER=\"{roles[\"router\"][\"agent_id\"]}\"')
-print(f'AGENT_PLANNER=\"{roles[\"planner\"][\"agent_id\"]}\"')
-print(f'AGENT_REVIEWER=\"{roles[\"reviewer\"][\"agent_id\"]}\"')
-print(f'AGENT_DISPATCHER=\"{roles[\"dispatcher\"][\"agent_id\"]}\"')
-print(f'AGENT_BRIEFING=\"{roles[\"briefing\"][\"agent_id\"]}\"')
-# departments
-deps = roles.get('departments', {})
-dep_ids = []
-dep_titles = []
-for k, v in deps.items():
-    dep_ids.append(v['agent_id'])
-    dep_titles.append(v['title'])
-print(f'DEP_IDS=({\" \".join(dep_ids)})')
-print(f'DEP_TITLES=({\" \".join([repr(x) for x in dep_titles])})')
-")"
+THEME_TASK_PREFIX="$(PYTHONPATH="$SCRIPT_DIR" python3 - "$THEME_FILE" <<'PY'
+import sys
+from theme_utils import load_theme
+
+theme = load_theme(sys.argv[1])
+print(theme.get("task_prefix", "JJC"))
+PY
+)"
+
+ALL_AGENTS=()
+while IFS= read -r agent_id; do
+  [[ -n "$agent_id" ]] && ALL_AGENTS+=("$agent_id")
+done < <(PYTHONPATH="$SCRIPT_DIR" python3 - "$THEME_FILE" <<'PY'
+import sys
+from theme_utils import get_all_agent_ids, load_theme
+
+theme = load_theme(sys.argv[1])
+for agent_id in get_all_agent_ids(theme):
+    print(agent_id)
+PY
+)
 
 if [[ "$PREFIX_SET" -eq 0 ]]; then
   TASK_PREFIX="$THEME_TASK_PREFIX"
 fi
-
-ALL_AGENTS=("$AGENT_ROUTER" "$AGENT_PLANNER" "$AGENT_REVIEWER" "$AGENT_DISPATCHER" "$AGENT_BRIEFING" "${DEP_IDS[@]}")
 
 # ---------- 交互式配置 ----------
 echo "=== 频道配置 ==="
@@ -107,23 +125,26 @@ read -r ENABLE_TG; ENABLE_TG="${ENABLE_TG:-n}"
 ask "启用 QQ 机器人? (y/n) [n]:"
 read -r ENABLE_QQ; ENABLE_QQ="${ENABLE_QQ:-n}"
 
-FEISHU_APP_ID="" FEISHU_APP_SECRET=""
-TG_BOT_TOKEN=""
-QQ_APP_ID="" QQ_CLIENT_SECRET=""
+FEISHU_APP_ID="" FEISHU_APP_SECRET="$EXISTING_FEISHU_SECRET"
+TG_BOT_TOKEN="$EXISTING_TG_TOKEN"
+QQ_APP_ID="" QQ_CLIENT_SECRET="$EXISTING_QQ_SECRET"
 
 if [[ "$ENABLE_FEISHU" == "y" ]]; then
   ask "飞书 App ID:"; read -r FEISHU_APP_ID
-  ask "飞书 App Secret:"; read -rs FEISHU_APP_SECRET; echo ""
+  ask "飞书 App Secret (留空保留现有值):"; read -rs INPUT_FEISHU_SECRET; echo ""
+  FEISHU_APP_SECRET="${INPUT_FEISHU_SECRET:-$FEISHU_APP_SECRET}"
 fi
 
 if [[ "$ENABLE_TG" == "y" ]]; then
-  ask "Telegram Bot Token:"; read -rs TG_BOT_TOKEN; echo ""
+  ask "Telegram Bot Token (留空保留现有值):"; read -rs INPUT_TG_BOT_TOKEN; echo ""
+  TG_BOT_TOKEN="${INPUT_TG_BOT_TOKEN:-$TG_BOT_TOKEN}"
   ask "Telegram 代理 (留空跳过):"; read -r TG_PROXY
 fi
 
 if [[ "$ENABLE_QQ" == "y" ]]; then
   ask "QQ Bot App ID:"; read -r QQ_APP_ID
-  ask "QQ Bot Client Secret:"; read -rs QQ_CLIENT_SECRET; echo ""
+  ask "QQ Bot Client Secret (留空保留现有值):"; read -rs INPUT_QQ_CLIENT_SECRET; echo ""
+  QQ_CLIENT_SECRET="${INPUT_QQ_CLIENT_SECRET:-$QQ_CLIENT_SECRET}"
 fi
 
 echo ""
@@ -153,6 +174,7 @@ for agent in "${ALL_AGENTS[@]}"; do
   cp "$TEMPLATES_DIR/scripts/kanban_update.py" "$OPENCLAW_DIR/workspace-$agent/scripts/"
   cp "$TEMPLATES_DIR/scripts/file_lock.py" "$OPENCLAW_DIR/workspace-$agent/scripts/"
   cp "$TEMPLATES_DIR/scripts/refresh_live_data.py" "$OPENCLAW_DIR/workspace-$agent/scripts/"
+  cp "$TEMPLATES_DIR/scripts/health_dashboard.py" "$OPENCLAW_DIR/workspace-$agent/scripts/"
 done
 info "看板脚本已部署到所有 workspace"
 
@@ -166,34 +188,44 @@ python3 "$PROJECT_DIR/bin/render_templates.py" \
 info "SOUL.md / HEARTBEAT.md / ORG-STRUCTURE.md / kanban_config.json 已生成"
 
 # ---------- 生成 openclaw.json ----------
-python3 "$PROJECT_DIR/bin/generate_config.py" \
-  --theme "$THEME_FILE" \
-  --openclaw-dir "$OPENCLAW_DIR" \
-  --primary-model "$PRIMARY_MODEL" \
-  --light-model "$LIGHT_MODEL" \
-  --feishu-app-id "$FEISHU_APP_ID" \
-  --feishu-app-secret "$FEISHU_APP_SECRET" \
-  --tg-bot-token "$TG_BOT_TOKEN" \
-  --tg-proxy "${TG_PROXY:-}" \
-  --qq-app-id "$QQ_APP_ID" \
-  --qq-client-secret "$QQ_CLIENT_SECRET" \
+GEN_CONFIG_ARGS=(
+  --theme "$THEME_FILE"
+  --openclaw-dir "$OPENCLAW_DIR"
+  --primary-model "$PRIMARY_MODEL"
+  --light-model "$LIGHT_MODEL"
+  --feishu-app-id "$FEISHU_APP_ID"
+  --feishu-app-secret "$FEISHU_APP_SECRET"
+  --tg-bot-token "$TG_BOT_TOKEN"
+  --tg-proxy "${TG_PROXY:-}"
+  --qq-app-id "$QQ_APP_ID"
+  --qq-client-secret "$QQ_CLIENT_SECRET"
   --task-prefix "$TASK_PREFIX"
+)
+if [[ -f "$OPENCLAW_DIR/openclaw.json" ]]; then
+  GEN_CONFIG_ARGS+=(--base-config "$OPENCLAW_DIR/openclaw.json")
+fi
+python3 "$PROJECT_DIR/bin/generate_config.py" "${GEN_CONFIG_ARGS[@]}"
 info "openclaw.json 已生成"
 
 # ---------- 写入 .env ----------
+if [[ -z "$EXISTING_GATEWAY_TOKEN" ]]; then
+  EXISTING_GATEWAY_TOKEN="$(openssl rand -hex 24)"
+fi
 cat > "$OPENCLAW_DIR/.env" << ENVEOF
 # 三省六部 Secrets — 请勿提交版本控制
 FEISHU_APP_SECRET=${FEISHU_APP_SECRET}
 TELEGRAM_BOT_TOKEN=${TG_BOT_TOKEN}
 QQBOT_CLIENT_SECRET=${QQ_CLIENT_SECRET}
-GATEWAY_AUTH_TOKEN=$(openssl rand -hex 24)
+GATEWAY_AUTH_TOKEN=${EXISTING_GATEWAY_TOKEN}
 ENVEOF
 chmod 600 "$OPENCLAW_DIR/.env"
 info "Secrets 已写入 .env (权限 600)"
 
 # ---------- 初始化看板数据 ----------
 for agent in "${ALL_AGENTS[@]}"; do
-  echo '[]' > "$OPENCLAW_DIR/workspace-$agent/data/tasks_source.json"
+  if [[ ! -f "$OPENCLAW_DIR/workspace-$agent/data/tasks_source.json" ]]; then
+    echo '[]' > "$OPENCLAW_DIR/workspace-$agent/data/tasks_source.json"
+  fi
 done
 info "看板数据已初始化"
 

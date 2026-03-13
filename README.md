@@ -35,6 +35,56 @@ bash bin/validate.sh   # 验证安装
 2. 配置频道（飞书 / Telegram / QQ）
 3. 选择模型
 
+## 5 分钟上手
+
+### 1. 安装到默认目录
+
+```bash
+bash bin/setup.sh
+```
+
+默认会写入 `~/.openclaw`。
+
+### 2. 安装完成后立即验证
+
+```bash
+bash bin/validate.sh --dir ~/.openclaw
+openclaw config validate
+```
+
+通过标准：
+- `validate.sh` 显示 11 个 agent 文件完整
+- `openclaw config validate` 返回 `Config valid`
+
+### 3. 启动网关
+
+```bash
+openclaw gateway run
+```
+
+另开一个终端检查：
+
+```bash
+openclaw gateway health
+```
+
+### 4. 查看运行状态
+
+```bash
+# imperial 主题示例
+python3 ~/.openclaw/workspace-taizi/scripts/health_dashboard.py
+```
+
+如果你使用的是 `startup` 或 `corporate` 主题，请把 `workspace-taizi` 替换成对应路由 agent 的 workspace，例如：
+- `startup` → `workspace-secretary`
+- `corporate` → `workspace-assistant`
+
+### 5. 首次使用建议
+
+- 先发一条简单消息，确认路由 Agent 能正常接收并回复
+- 再发一条明确任务，确认会自动建任务并流转到规划/执行链路
+- 若升级过 OpenClaw，建议补跑一次 `openclaw gateway health`
+
 ## 三套主题
 
 | 主题 | 风格 | 适合场景 |

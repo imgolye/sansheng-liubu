@@ -1,5 +1,7 @@
 # 三省六部 — OpenClaw 多 Agent 编排系统
 
+[![Release](https://img.shields.io/github/v/release/imgolye/sansheng-liubu?label=release)](https://github.com/imgolye/sansheng-liubu/releases/latest)
+
 一键部署 11 个协作 AI Agent，模拟组织架构处理复杂任务。
 
 ## 架构

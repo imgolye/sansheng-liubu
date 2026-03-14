@@ -11,33 +11,57 @@ import json
 import mimetypes
 import os
 import secrets
+import shutil
 import subprocess
 import time
-from collections import Counter, defaultdict
+from collections import Counter, defaultdict, deque
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, quote, urlsplit
+from urllib.request import Request, urlopen
 
 from dashboard_store import (
     append_audit_event as store_append_audit_event,
     create_management_run as store_create_management_run,
+    create_tenant_api_key as store_create_tenant_api_key,
     delete_product_installation as store_delete_product_installation,
+    list_automation_alerts as store_list_automation_alerts,
+    list_automation_rules as store_list_automation_rules,
     list_management_runs as store_list_management_runs,
+    list_orchestration_workflows as store_list_orchestration_workflows,
+    list_notification_channels as store_list_notification_channels,
+    list_notification_deliveries as store_list_notification_deliveries,
+    list_routing_policies as store_list_routing_policies,
+    list_tenant_api_keys as store_list_tenant_api_keys,
+    list_tenant_installations as store_list_tenant_installations,
+    list_tenants as store_list_tenants,
     load_audit_events as store_load_audit_events,
     load_product_installations as store_load_product_installations,
     load_product_users as store_load_product_users,
+    resolve_automation_alerts as store_resolve_automation_alerts,
+    resolve_tenant_api_key as store_resolve_tenant_api_key,
     save_product_users as store_save_product_users,
+    save_automation_rule as store_save_automation_rule,
+    save_notification_channel as store_save_notification_channel,
+    save_notification_delivery as store_save_notification_delivery,
+    save_orchestration_workflow as store_save_orchestration_workflow,
+    save_routing_policy as store_save_routing_policy,
+    save_tenant as store_save_tenant,
+    save_tenant_installation as store_save_tenant_installation,
     store_path as dashboard_store_path,
+    touch_tenant_api_key as store_touch_tenant_api_key,
+    upsert_automation_alert as store_upsert_automation_alert,
     update_management_run as store_update_management_run,
     upsert_product_installation as store_upsert_product_installation,
 )
 
 
 TERMINAL_STATES = {"done", "cancelled", "canceled"}
-PRODUCT_VERSION = "1.16.0"
+PRODUCT_VERSION = "1.18.0"
 OPENCLAW_BASELINE_RELEASE = "2026.3.12"
 PASSWORD_HASH_ITERATIONS = 260000
 USER_ROLES = {
@@ -6741,7 +6765,9 @@ def build_dashboard_data(openclaw_dir):
     conversation_data = load_conversation_catalog(openclaw_dir, config, agent_labels)
     skills_data = load_skills_catalog(openclaw_dir, config=config)
     openclaw_data = load_openclaw_control_data(openclaw_dir)
-    management_data = build_management_data(openclaw_dir, task_index, conversation_data, deliverables, now)
+    context_hub_data = load_context_hub_data(openclaw_dir)
+    management_data = build_management_data(openclaw_dir, task_index, conversation_data, deliverables, agent_cards, global_events, relays, now)
+    orchestration_data = build_orchestration_data(openclaw_dir, agent_cards, task_index, router_agent_id, now)
     native_skill_names = set(openclaw_data.pop("_nativeSkillNames", []))
     managed_skills_root = str((openclaw_data.get("nativeSkills", {}) or {}).get("managedSkillsDir", "") or "").strip()
     managed_skills_dir = Path(managed_skills_root).expanduser() if managed_skills_root else None
@@ -6779,9 +6805,11 @@ def build_dashboard_data(openclaw_dir):
         "commands": product_commands,
         "admin": admin_data,
         "management": management_data,
+        "orchestration": orchestration_data,
         "conversations": conversation_data,
         "skills": skills_data,
         "openclaw": openclaw_data,
+        "contextHub": context_hub_data,
         "metrics": {
             "activeTasks": len(active_tasks),
             "activeAgents": active_agent_count,
@@ -7213,6 +7241,134 @@ def remove_installation(openclaw_dir, target_dir):
     return candidate
 
 
+def find_tenant_record(openclaw_dir, tenant_ref):
+    tenant_ref = str(tenant_ref or "").strip()
+    if not tenant_ref:
+        return None
+    for tenant in store_list_tenants(openclaw_dir):
+        if tenant.get("id") == tenant_ref or tenant.get("slug") == tenant_ref:
+            return tenant
+    return None
+
+
+def tenant_primary_openclaw_dir(openclaw_dir, tenant):
+    if not tenant:
+        return None
+    candidate = str(tenant.get("primaryOpenclawDir", "")).strip()
+    if candidate:
+        return Path(candidate).expanduser().resolve()
+    installations = store_list_tenant_installations(openclaw_dir, tenant.get("id", ""))
+    primary = next((item for item in installations if item.get("role") == "primary"), None)
+    if primary and primary.get("openclawDir"):
+        return Path(primary["openclawDir"]).expanduser().resolve()
+    if installations and installations[0].get("openclawDir"):
+        return Path(installations[0]["openclawDir"]).expanduser().resolve()
+    return None
+
+
+def build_tenant_admin_data(openclaw_dir, now):
+    tenants = store_list_tenants(openclaw_dir)
+    tenant_installations = store_list_tenant_installations(openclaw_dir)
+    installation_registry = {
+        item.get("openclawDir"): item
+        for item in store_load_product_installations(openclaw_dir)
+    }
+    api_keys_by_tenant = defaultdict(list)
+    for item in store_list_tenant_api_keys(openclaw_dir):
+        api_keys_by_tenant[item.get("tenantId", "")].append(item)
+
+    installation_groups = defaultdict(list)
+    for item in tenant_installations:
+        installation_groups[item.get("tenantId", "")].append(item)
+
+    items = []
+    for tenant in tenants:
+        primary_dir = tenant_primary_openclaw_dir(openclaw_dir, tenant)
+        tenant_summary = None
+        if primary_dir and primary_dir.exists():
+            try:
+                tenant_config = load_config(primary_dir)
+                tenant_tasks = merge_tasks(primary_dir, tenant_config)
+                tenant_summary = {
+                    "taskIndex": tenant_tasks,
+                    "agents": load_agents(tenant_config),
+                    "generatedAt": max(
+                        [item.get("updatedAt", "") for item in tenant_tasks if item.get("updatedAt")] or [now_iso()]
+                    ),
+                }
+            except Exception:
+                tenant_summary = None
+        installations = installation_groups.get(tenant.get("id", ""), [])
+        task_index = (tenant_summary or {}).get("taskIndex", [])
+        agents = (tenant_summary or {}).get("agents", [])
+        items.append(
+            {
+                **tenant,
+                "statusLabel": "Active" if tenant.get("status") == "active" else "Suspended",
+                "primaryOpenclawDir": str(primary_dir) if primary_dir else tenant.get("primaryOpenclawDir", ""),
+                "installationCount": len(installations),
+                "activeTasks": sum(
+                    1
+                    for task in task_index
+                    if str(task.get("state", "")).strip().lower() not in TERMINAL_STATES
+                ),
+                "blockedTasks": sum(1 for task in task_index if task.get("blocked")),
+                "agentCount": len(agents),
+                "apiKeyCount": len(api_keys_by_tenant.get(tenant.get("id", ""), [])),
+                "lastUpdatedAt": (tenant_summary or {}).get("generatedAt", ""),
+                "lastUpdatedAgo": format_age(parse_iso((tenant_summary or {}).get("generatedAt", "")), now)
+                if (tenant_summary or {}).get("generatedAt")
+                else "未同步",
+                "installations": [
+                    {
+                        **item,
+                        "theme": installation_registry.get(item.get("openclawDir", ""), {}).get("theme", ""),
+                        "registeredLabel": installation_registry.get(item.get("openclawDir", ""), {}).get("label", item.get("label", "")),
+                    }
+                    for item in installations
+                ],
+            }
+        )
+
+    return {
+        "items": items,
+        "installations": tenant_installations,
+        "apiKeys": [
+            {
+                **item,
+                "tenantName": next(
+                    (tenant.get("name") for tenant in tenants if tenant.get("id") == item.get("tenantId")),
+                    item.get("tenantId", ""),
+                ),
+            }
+            for item in store_list_tenant_api_keys(openclaw_dir)
+        ],
+        "summary": {
+            "total": len(items),
+            "active": sum(1 for item in items if item.get("status") == "active"),
+            "installations": len(tenant_installations),
+            "apiKeys": sum(len(values) for values in api_keys_by_tenant.values()),
+        },
+    }
+
+
+def api_scope_allows(granted_scopes, required_scope):
+    required_scope = str(required_scope or "").strip()
+    scopes = {str(item).strip() for item in granted_scopes or [] if str(item).strip()}
+    if not required_scope:
+        return True
+    if "*" in scopes or required_scope in scopes:
+        return True
+    resource, _, action = required_scope.partition(":")
+    if resource and f"{resource}:*" in scopes:
+        return True
+    if action and f"*:{action}" in scopes:
+        return True
+    if "tenant:read" in scopes and action == "read":
+        return True
+    return False
+
+
 def build_admin_data(openclaw_dir, config, now, include_sensitive=True):
     sync_current_installation_registry(openclaw_dir, config)
     users = [safe_user_record(user) for user in load_product_users(openclaw_dir)]
@@ -7256,6 +7412,7 @@ def build_admin_data(openclaw_dir, config, now, include_sensitive=True):
         for role, meta in USER_ROLES.items()
     ]
     metadata = load_project_metadata(openclaw_dir, config=config)
+    tenant_admin = build_tenant_admin_data(openclaw_dir, now)
     return {
         "workspace": {
             "displayName": metadata.get("displayName") or metadata.get("theme", "Mission Control"),
@@ -7284,6 +7441,10 @@ def build_admin_data(openclaw_dir, config, now, include_sensitive=True):
         "users": users if include_sensitive else [],
         "auditEvents": recent_events[:32] if include_sensitive else [],
         "roleMatrix": role_matrix,
+        "tenants": tenant_admin["items"] if include_sensitive else [],
+        "tenantInstallations": tenant_admin["installations"] if include_sensitive else [],
+        "tenantApiKeys": tenant_admin["apiKeys"] if include_sensitive else [],
+        "tenantSummary": tenant_admin["summary"],
         "hasUsers": bool(users),
     }
 
@@ -7382,6 +7543,406 @@ def run_python_script(script_path, args, cwd=None):
     process = run_command(["python3", str(script_path), *[str(arg) for arg in args]], cwd=cwd)
     output_parts = [part.strip() for part in (process.stdout, process.stderr) if part and part.strip()]
     return process, "\n".join(output_parts)
+
+
+def openclaw_browser_command(profile=""):
+    args = ["openclaw", "browser"]
+    normalized = str(profile or "").strip()
+    if normalized:
+        args.extend(["--browser-profile", normalized])
+    return args
+
+
+def join_command_output(process):
+    return "\n".join(part.strip() for part in (process.stdout, process.stderr) if part and part.strip()).strip()
+
+
+def context_hub_bin():
+    explicit = str(os.environ.get("CHUB_BIN", "")).strip()
+    if explicit:
+        return explicit
+    return shutil.which("chub") or ""
+
+
+def parse_context_hub_version(text):
+    for line in str(text or "").splitlines():
+        line = line.strip()
+        if "Context Hub CLI v" in line:
+            return line.rsplit("v", 1)[-1].strip()
+    return ""
+
+
+def context_hub_config_path():
+    return Path.home() / ".chub" / "config.yaml"
+
+
+def context_hub_annotations_path():
+    return Path.home() / ".chub" / "annotations"
+
+
+def summarize_context_hub_config(path):
+    summary = {
+        "path": str(path),
+        "exists": path.exists(),
+        "sourceCount": 0,
+        "sourcePolicy": "",
+        "refreshInterval": "",
+        "telemetry": "",
+        "feedback": "",
+    }
+    if not path.exists():
+        return summary
+    try:
+        for raw_line in path.read_text(encoding="utf-8").splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if line.startswith("- name:"):
+                summary["sourceCount"] += 1
+            elif line.startswith("source:"):
+                summary["sourcePolicy"] = line.split(":", 1)[1].strip().strip('"')
+            elif line.startswith("refresh_interval:"):
+                summary["refreshInterval"] = line.split(":", 1)[1].strip()
+            elif line.startswith("telemetry:"):
+                summary["telemetry"] = line.split(":", 1)[1].strip()
+            elif line.startswith("feedback:"):
+                summary["feedback"] = line.split(":", 1)[1].strip()
+    except Exception:
+        return summary
+    return summary
+
+
+def run_context_hub_command(args, cwd=None):
+    binary = context_hub_bin()
+    if not binary:
+        raise RuntimeError("当前环境未安装 Context Hub CLI（chub）。")
+    return run_command([binary, *[str(arg) for arg in args]], cwd=cwd)
+
+
+def load_context_hub_data(openclaw_dir):
+    def build():
+        binary = context_hub_bin()
+        config_path = context_hub_config_path()
+        annotations_path = context_hub_annotations_path()
+        config_summary = summarize_context_hub_config(config_path)
+        data = {
+            "supported": True,
+            "installed": bool(binary),
+            "binary": binary,
+            "version": "",
+            "status": "warning",
+            "config": config_summary,
+            "cache": {"exists": False, "sources": []},
+            "annotations": {
+                "path": str(annotations_path),
+                "total": 0,
+                "items": [],
+            },
+            "recommended": [
+                {"label": "OpenAI SDK", "query": "openai", "id": "openai/chat"},
+                {"label": "Browser automation", "query": "browser automation", "id": "playwright"},
+                {"label": "Stripe payments", "query": "stripe payments", "id": "stripe/api"},
+                {"label": "Supabase", "query": "supabase", "id": "supabase"},
+            ],
+            "commands": [
+                {
+                    "label": "Search docs",
+                    "command": "chub search openai --json",
+                    "description": "搜索最新可用文档和技能。",
+                },
+                {
+                    "label": "Fetch a doc",
+                    "command": "chub get openai/chat --lang py --json",
+                    "description": "抓取指定文档正文，支持语言和增量文件。",
+                },
+                {
+                    "label": "List annotations",
+                    "command": "chub annotate --list --json",
+                    "description": "查看本机已经积累的注释记忆。",
+                },
+                {
+                    "label": "Refresh registry",
+                    "command": "chub update --json",
+                    "description": "更新 Context Hub 本地 registry 缓存。",
+                },
+            ],
+        }
+        if not binary:
+            return data
+
+        help_result = run_context_hub_command(["help"])
+        data["version"] = parse_context_hub_version(help_result.stdout or help_result.stderr)
+
+        cache_result = run_context_hub_command(["cache", "status", "--json"])
+        cache_payload = parse_json_payload(cache_result.stdout, cache_result.stderr, default={"exists": False, "sources": []})
+        if isinstance(cache_payload, dict):
+            data["cache"] = cache_payload
+
+        annotations_result = run_context_hub_command(["annotate", "--list", "--json"])
+        annotation_items = parse_json_payload(annotations_result.stdout, annotations_result.stderr, default=[])
+        if isinstance(annotation_items, list):
+            data["annotations"] = {
+                "path": str(annotations_path),
+                "total": len(annotation_items),
+                "items": annotation_items[:20],
+            }
+
+        data["status"] = "ready" if data["installed"] else "warning"
+        return data
+
+    return cached_payload(("context-hub", str(Path(openclaw_dir).expanduser().resolve())), 10, build)
+
+
+def perform_context_hub_install():
+    process = run_command(["npm", "install", "-g", "@aisuite/chub"])
+    output = join_command_output(process)
+    if process.returncode != 0:
+        raise RuntimeError(output or "安装 Context Hub CLI 失败。")
+    help_result = run_context_hub_command(["help"])
+    return {
+        "installed": True,
+        "version": parse_context_hub_version(help_result.stdout or help_result.stderr),
+        "output": output or join_command_output(help_result),
+    }
+
+
+def perform_context_hub_update():
+    process = run_context_hub_command(["update", "--json"])
+    payload = parse_json_payload(process.stdout, process.stderr, default=None)
+    output = join_command_output(process)
+    if process.returncode != 0 and payload is None:
+        raise RuntimeError(output or "更新 Context Hub registry 失败。")
+    return {"payload": payload, "output": output}
+
+
+def perform_context_hub_search(query, lang="", tags="", limit=8):
+    normalized_query = str(query or "").strip()
+    if not normalized_query:
+        raise RuntimeError("请先输入要检索的内容。")
+    args = ["search", normalized_query, "--json", "--limit", str(limit or 8)]
+    if lang:
+        args.extend(["--lang", lang])
+    if tags:
+        args.extend(["--tags", tags])
+    process = run_context_hub_command(args)
+    payload = parse_json_payload(process.stdout, process.stderr, default=None)
+    if process.returncode != 0 or not isinstance(payload, dict):
+        raise RuntimeError(join_command_output(process) or "Context Hub 搜索失败。")
+    return payload
+
+
+def perform_context_hub_get(entry_id, lang="", full=False, files=""):
+    normalized_id = str(entry_id or "").strip()
+    if not normalized_id:
+        raise RuntimeError("请先输入要获取的文档 ID。")
+    args = ["get", normalized_id, "--json"]
+    if lang:
+        args.extend(["--lang", lang])
+    if full:
+        args.append("--full")
+    if files:
+        args.extend(["--file", files])
+    process = run_context_hub_command(args)
+    payload = parse_json_payload(process.stdout, process.stderr, default=None)
+    if process.returncode != 0 or not isinstance(payload, dict):
+        raise RuntimeError(join_command_output(process) or f"获取 Context Hub 文档失败：{normalized_id}")
+    return payload
+
+
+def perform_context_hub_annotate(entry_id, note="", clear=False):
+    normalized_id = str(entry_id or "").strip()
+    if not normalized_id:
+        raise RuntimeError("请先输入要标注的文档 ID。")
+    args = ["annotate", normalized_id]
+    if clear:
+        args.append("--clear")
+    else:
+        normalized_note = str(note or "").strip()
+        if not normalized_note:
+            raise RuntimeError("请先输入要保存的 annotation。")
+        args.append(normalized_note)
+    args.append("--json")
+    process = run_context_hub_command(args)
+    payload = parse_json_payload(process.stdout, process.stderr, default=None)
+    if process.returncode != 0 or not isinstance(payload, dict):
+        raise RuntimeError(join_command_output(process) or f"保存 Context Hub annotation 失败：{normalized_id}")
+    return payload
+
+
+def perform_context_hub_feedback(entry_id, rating, comment="", labels=None, lang="", file_path="", agent="", model=""):
+    normalized_id = str(entry_id or "").strip()
+    normalized_rating = str(rating or "").strip().lower()
+    if not normalized_id:
+        raise RuntimeError("请先输入要反馈的文档 ID。")
+    if normalized_rating not in {"up", "down"}:
+        raise RuntimeError("反馈只能是 up 或 down。")
+    args = ["feedback", normalized_id, normalized_rating]
+    normalized_comment = str(comment or "").strip()
+    if normalized_comment:
+        args.append(normalized_comment)
+    for label in labels or []:
+        if str(label).strip():
+            args.extend(["--label", str(label).strip()])
+    if lang:
+        args.extend(["--lang", lang])
+    if file_path:
+        args.extend(["--file", file_path])
+    if agent:
+        args.extend(["--agent", agent])
+    if model:
+        args.extend(["--model", model])
+    args.append("--json")
+    process = run_context_hub_command(args)
+    payload = parse_json_payload(process.stdout, process.stderr, default=None)
+    if process.returncode != 0 or not isinstance(payload, dict):
+        raise RuntimeError(join_command_output(process) or f"发送 Context Hub feedback 失败：{normalized_id}")
+    if payload.get("status") == "error":
+        raise RuntimeError(payload.get("reason") or "发送 Context Hub feedback 失败。")
+    return payload
+
+
+def perform_gateway_service_action(openclaw_dir, action):
+    action_name = str(action or "").strip().lower()
+    if action_name not in {"start", "restart", "stop", "status"}:
+        raise RuntimeError(f"不支持的 gateway 动作：{action_name}")
+    env = openclaw_command_env(openclaw_dir)
+    args = ["openclaw", "gateway", action_name]
+    if action_name == "status":
+        args.extend(["--require-rpc", "--json"])
+    process = run_command(args, env=env)
+    payload = parse_json_payload(process.stdout, process.stderr, default=None)
+    output = join_command_output(process)
+    if process.returncode != 0 and payload is None:
+        raise RuntimeError(output or f"gateway {action_name} 执行失败。")
+    return {"action": action_name, "payload": payload, "output": output}
+
+
+def perform_browser_extension_action(openclaw_dir, action):
+    action_name = str(action or "").strip().lower()
+    if action_name not in {"install", "path"}:
+        raise RuntimeError(f"不支持的 browser extension 动作：{action_name}")
+    env = openclaw_command_env(openclaw_dir)
+    args = ["openclaw", "browser", "extension", action_name]
+    process = run_command(args, env=env)
+    output = join_command_output(process)
+    if process.returncode != 0 and action_name != "path":
+        raise RuntimeError(output or f"browser extension {action_name} 执行失败。")
+    return {"action": action_name, "output": output, "ok": process.returncode == 0}
+
+
+def perform_browser_start(openclaw_dir, profile=""):
+    env = openclaw_command_env(openclaw_dir)
+    process = run_command([*openclaw_browser_command(profile), "start"], env=env)
+    output = join_command_output(process)
+    if process.returncode != 0:
+        raise RuntimeError(output or "browser start 执行失败。")
+    return {"output": output}
+
+
+def perform_browser_create_profile(openclaw_dir, name, driver="openclaw", color="", cdp_url=""):
+    profile_name = str(name or "").strip()
+    if not profile_name:
+        raise RuntimeError("profile 名称不能为空。")
+    env = openclaw_command_env(openclaw_dir)
+    args = ["openclaw", "browser", "create-profile", "--name", profile_name]
+    normalized_driver = str(driver or "").strip()
+    if normalized_driver:
+        args.extend(["--driver", normalized_driver])
+    normalized_color = str(color or "").strip()
+    if normalized_color:
+        args.extend(["--color", normalized_color])
+    normalized_cdp = str(cdp_url or "").strip()
+    if normalized_cdp:
+        args.extend(["--cdp-url", normalized_cdp])
+    process = run_command(args, env=env)
+    output = join_command_output(process)
+    if process.returncode != 0:
+        raise RuntimeError(output or "browser profile 创建失败。")
+    return {"name": profile_name, "output": output}
+
+
+def perform_browser_open(openclaw_dir, url, profile=""):
+    normalized_url = str(url or "").strip()
+    if not normalized_url:
+        raise RuntimeError("URL 不能为空。")
+    env = openclaw_command_env(openclaw_dir)
+    process = run_command([*openclaw_browser_command(profile), "open", normalized_url], env=env)
+    output = join_command_output(process)
+    if process.returncode != 0:
+        raise RuntimeError(output or "browser open 执行失败。")
+    return {"url": normalized_url, "output": output}
+
+
+def perform_browser_snapshot(openclaw_dir, profile="", selector="", target_id="", limit=120):
+    env = openclaw_command_env(openclaw_dir)
+    args = [*openclaw_browser_command(profile), "snapshot", "--format", "ai", "--limit", str(limit)]
+    normalized_selector = str(selector or "").strip()
+    normalized_target = str(target_id or "").strip()
+    if normalized_selector:
+        args.extend(["--selector", normalized_selector])
+    if normalized_target:
+        args.extend(["--target-id", normalized_target])
+    process = run_command(args, env=env)
+    output = join_command_output(process)
+    if process.returncode != 0:
+        raise RuntimeError(output or "browser snapshot 执行失败。")
+    return {"output": output}
+
+
+def perform_browser_plan(openclaw_dir, steps, profile=""):
+    if not isinstance(steps, list) or not steps:
+        raise RuntimeError("browser plan 不能为空，且必须是动作数组。")
+    env = openclaw_command_env(openclaw_dir)
+    results = []
+    for index, step in enumerate(steps, start=1):
+        if not isinstance(step, dict):
+            raise RuntimeError(f"第 {index} 步必须是对象。")
+        action = str(step.get("action", "")).strip().lower()
+        target_id = str(step.get("targetId", "")).strip()
+        args = [*openclaw_browser_command(profile)]
+        if action == "open":
+            url = str(step.get("url", "")).strip()
+            if not url:
+                raise RuntimeError(f"第 {index} 步 open 缺少 url。")
+            args.extend(["open", url])
+        elif action == "snapshot":
+            args.extend(["snapshot", "--format", str(step.get("format", "ai") or "ai"), "--limit", str(step.get("limit", 120) or 120)])
+            selector = str(step.get("selector", "")).strip()
+            if selector:
+                args.extend(["--selector", selector])
+        elif action == "click":
+            ref = str(step.get("ref", "")).strip()
+            if not ref:
+                raise RuntimeError(f"第 {index} 步 click 缺少 ref。")
+            args.extend(["click", ref])
+            if step.get("double"):
+                args.append("--double")
+        elif action == "wait":
+            args.append("wait")
+            if step.get("time") is not None:
+                args.extend(["--time", str(step.get("time"))])
+            if step.get("selector"):
+                args.append(str(step.get("selector")))
+            if step.get("text"):
+                args.extend(["--text", str(step.get("text"))])
+            if step.get("url"):
+                args.extend(["--url", str(step.get("url"))])
+        elif action == "fill":
+            fields = step.get("fields", [])
+            if not isinstance(fields, list) or not fields:
+                raise RuntimeError(f"第 {index} 步 fill 缺少 fields。")
+            args.extend(["fill", "--fields", json.dumps(fields, ensure_ascii=False)])
+        else:
+            raise RuntimeError(f"第 {index} 步是不支持的 browser 动作：{action}")
+
+        if target_id:
+            args.extend(["--target-id", target_id])
+        process = run_command(args, env=env)
+        output = join_command_output(process)
+        if process.returncode != 0:
+            raise RuntimeError(output or f"第 {index} 步 {action} 执行失败。")
+        results.append({"index": index, "action": action, "output": output})
+    return {"results": results}
 
 
 def perform_task_create(openclaw_dir, title, remark=""):
@@ -7556,6 +8117,7 @@ def load_openclaw_control_data(openclaw_dir):
 
     def build():
         env = openclaw_command_env(openclaw_dir)
+        local_config = load_config(openclaw_dir)
         try:
             version_result = run_command(["openclaw", "--version"], env=env)
         except FileNotFoundError:
@@ -7614,11 +8176,64 @@ def load_openclaw_control_data(openclaw_dir):
                 "agents": [],
             }
 
+        gateway_status_result = run_command(["openclaw", "gateway", "status", "--require-rpc", "--json"], env=env)
+        gateway_status_payload = parse_json_payload(gateway_status_result.stdout, gateway_status_result.stderr, default=None)
+        if gateway_status_payload is None:
+            gateway_status_payload = {
+                "service": {"runtime": {"status": "unknown"}},
+                "gateway": {"bindMode": "", "port": None, "probeUrl": ""},
+                "rpc": {
+                    "ok": False,
+                    "error": (gateway_status_result.stderr or gateway_status_result.stdout or "gateway_status_failed").strip(),
+                    "url": "",
+                },
+                "config": {},
+            }
+        rpc_payload = gateway_status_payload.get("rpc", {}) if isinstance(gateway_status_payload, dict) else {}
+        service_payload = gateway_status_payload.get("service", {}) if isinstance(gateway_status_payload, dict) else {}
+        gateway_runtime_payload = gateway_status_payload.get("gateway", {}) if isinstance(gateway_status_payload, dict) else {}
+        rpc_ok = bool(rpc_payload.get("ok"))
+
+        browser_status_payload = {
+            "ok": False,
+            "running": False,
+            "profile": "",
+            "targets": 0,
+            "error": rpc_payload.get("error", "") if isinstance(rpc_payload, dict) else "",
+        }
+        browser_profiles_payload = {"profiles": []}
+        if rpc_ok:
+            browser_status_result = run_command(["openclaw", "browser", "status", "--json"], env=env)
+            parsed_browser_status = parse_json_payload(browser_status_result.stdout, browser_status_result.stderr, default=None)
+            if isinstance(parsed_browser_status, dict):
+                browser_status_payload = parsed_browser_status
+            else:
+                browser_status_payload = {
+                    "ok": False,
+                    "running": False,
+                    "profile": "",
+                    "targets": 0,
+                    "error": (browser_status_result.stderr or browser_status_result.stdout or "browser_status_failed").strip(),
+                }
+
+            browser_profiles_result = run_command(["openclaw", "browser", "profiles", "--json"], env=env)
+            parsed_browser_profiles = parse_json_payload(browser_profiles_result.stdout, browser_profiles_result.stderr, default=None)
+            if isinstance(parsed_browser_profiles, dict):
+                browser_profiles_payload = parsed_browser_profiles
+            elif isinstance(parsed_browser_profiles, list):
+                browser_profiles_payload = {"profiles": parsed_browser_profiles}
+            else:
+                browser_profiles_payload = {"profiles": []}
+
         skills_result = run_command(["openclaw", "skills", "list", "--json"], env=env)
         native_skills_payload = parse_json_payload(skills_result.stdout, skills_result.stderr, default={"skills": []})
         native_skill_entries = native_skills_payload.get("skills", []) if isinstance(native_skills_payload, dict) else []
         managed_skills_dir = native_skills_payload.get("managedSkillsDir", "") if isinstance(native_skills_payload, dict) else ""
         workspace_dir = native_skills_payload.get("workspaceDir", "") if isinstance(native_skills_payload, dict) else ""
+        skills_check_result = run_command(["openclaw", "skills", "check", "--json"], env=env)
+        skills_check_payload = parse_json_payload(skills_check_result.stdout, skills_check_result.stderr, default={"summary": {}, "missingRequirements": []})
+        if not isinstance(skills_check_payload, dict):
+            skills_check_payload = {"summary": {}, "missingRequirements": []}
 
         source_counter = Counter(item.get("source", "unknown") for item in native_skill_entries)
         missing_bins = Counter()
@@ -7677,6 +8292,39 @@ def load_openclaw_control_data(openclaw_dir):
                     }
                 )
 
+        browser_profiles = browser_profiles_payload.get("profiles", []) if isinstance(browser_profiles_payload, dict) else []
+        normalized_browser_profiles = []
+        preferred_profile_names = {"user", "chrome-relay"}
+        browser_profile_names = set()
+        for item in browser_profiles:
+            if not isinstance(item, dict):
+                continue
+            name = str(item.get("name") or item.get("profile") or item.get("id") or "").strip()
+            if not name:
+                continue
+            browser_profile_names.add(name)
+            normalized_browser_profiles.append(
+                {
+                    "name": name,
+                    "running": bool(item.get("running")),
+                    "detail": item.get("description") or item.get("path") or item.get("label") or "",
+                }
+            )
+        recommended_profiles = [
+            {
+                "name": "user",
+                "title": "user",
+                "detail": "复用用户已登录的本地 Chrome / Chromium 会话，适合真实业务站点联调。",
+                "available": "user" in browser_profile_names,
+            },
+            {
+                "name": "chrome-relay",
+                "title": "chrome-relay",
+                "detail": "通过 Chrome relay / DevTools attach 连接浏览器，适合新版浏览器自动化能力。",
+                "available": "chrome-relay" in browser_profile_names,
+            },
+        ]
+
         channel_entries = []
         health_channels = health_payload.get("channels", {}) if isinstance(health_payload, dict) else {}
         channel_order = health_payload.get("channelOrder", []) if isinstance(health_payload, dict) else []
@@ -7700,6 +8348,23 @@ def load_openclaw_control_data(openclaw_dir):
                 }
             )
 
+        agent_params = []
+        config_agents = ((local_config.get("agents", {}) if isinstance(local_config, dict) else {}) or {}).get("list", [])
+        for agent in config_agents if isinstance(config_agents, list) else []:
+            if not isinstance(agent, dict):
+                continue
+            params = agent.get("params", {})
+            if not params:
+                continue
+            agent_params.append(
+                {
+                    "id": agent.get("id", ""),
+                    "workspace": agent.get("workspace", ""),
+                    "params": params,
+                    "summary": ", ".join(f"{key}={value}" for key, value in list(params.items())[:5]),
+                }
+            )
+
         compatibility = [
             {
                 "title": "OpenClaw 版本",
@@ -7720,6 +8385,12 @@ def load_openclaw_control_data(openclaw_dir):
                 "meta": f"channel {len(channel_entries)} · agent {len(health_payload.get('agents', []) or [])}",
             },
             {
+                "title": "Gateway RPC",
+                "status": "ready" if rpc_ok else "warning",
+                "body": "Gateway RPC 严格检查通过。" if rpc_ok else "新版 `gateway status --require-rpc` 未通过，浏览器和部分实时控制能力会受影响。",
+                "meta": rpc_payload.get("url") or gateway_runtime_payload.get("probeUrl") or "no rpc url",
+            },
+            {
                 "title": "原生 Skills",
                 "status": "ready" if native_skill_entries else "warning",
                 "body": f"OpenClaw 当前识别到 {len(native_skill_entries)} 个原生 skills，其中 {eligible} 个可直接使用。",
@@ -7730,6 +8401,12 @@ def load_openclaw_control_data(openclaw_dir):
                 "status": "ready" if managed_skills_dir else "warning",
                 "body": managed_skills_dir or "当前没有返回 managed skills 目录。",
                 "meta": workspace_dir or str(openclaw_dir),
+            },
+            {
+                "title": "Browser Live Session",
+                "status": "ready" if rpc_ok and preferred_profile_names.intersection(browser_profile_names) else "warning",
+                "body": "新版浏览器 live session/profile 能力已可用。" if rpc_ok and preferred_profile_names.intersection(browser_profile_names) else "建议补 browser profile 或先修复 RPC，才能稳定接入新版浏览器能力。",
+                "meta": ", ".join(sorted(browser_profile_names)) if browser_profile_names else "recommended: user, chrome-relay",
             },
         ]
 
@@ -7746,6 +8423,24 @@ def load_openclaw_control_data(openclaw_dir):
                 "agentCount": len(health_payload.get("agents", []) or []),
                 "channels": channel_entries,
                 "error": health_payload.get("error", ""),
+                "rpc": {
+                    "ok": rpc_ok,
+                    "url": rpc_payload.get("url", ""),
+                    "error": rpc_payload.get("error", ""),
+                    "serviceStatus": (((service_payload.get("runtime", {}) if isinstance(service_payload.get("runtime"), dict) else {}) or {}).get("status", "")),
+                    "bindMode": gateway_runtime_payload.get("bindMode", ""),
+                    "port": gateway_runtime_payload.get("port"),
+                    "probeUrl": gateway_runtime_payload.get("probeUrl", ""),
+                },
+            },
+            "browser": {
+                "ok": bool(browser_status_payload.get("ok")) if isinstance(browser_status_payload, dict) else False,
+                "running": bool(browser_status_payload.get("running")) if isinstance(browser_status_payload, dict) else False,
+                "profile": browser_status_payload.get("profile", "") if isinstance(browser_status_payload, dict) else "",
+                "targets": browser_status_payload.get("targets", 0) if isinstance(browser_status_payload, dict) else 0,
+                "error": browser_status_payload.get("error", "") if isinstance(browser_status_payload, dict) else "",
+                "profiles": normalized_browser_profiles,
+                "recommendedProfiles": recommended_profiles,
             },
             "nativeSkills": {
                 "total": len(native_skill_entries),
@@ -7763,7 +8458,13 @@ def load_openclaw_control_data(openclaw_dir):
                 "missingConfig": top_counter_items(missing_config),
                 "sourceBreakdown": top_counter_items(source_counter),
                 "warnings": [line.strip() for line in (skills_result.stderr or "").splitlines() if line.strip()],
+                "check": {
+                    "summary": skills_check_payload.get("summary", {}),
+                    "missingRequirements": skills_check_payload.get("missingRequirements", []),
+                    "warnings": [line.strip() for line in (skills_check_result.stderr or "").splitlines() if line.strip()],
+                },
             },
+            "agentParams": agent_params,
             "compatibility": compatibility,
             "commands": [
                 {
@@ -7780,6 +8481,21 @@ def load_openclaw_control_data(openclaw_dir):
                     "label": "Gateway 健康",
                     "command": f"{env_prefix} openclaw gateway health --json",
                     "description": "获取当前 Gateway、channels、agents 的结构化健康数据。",
+                },
+                {
+                    "label": "Gateway RPC 严格检查",
+                    "command": f"{env_prefix} openclaw gateway status --require-rpc --json",
+                    "description": "检查新版 Gateway RPC 是否真正在线，适合排查浏览器与实时控制链路。",
+                },
+                {
+                    "label": "Browser Status",
+                    "command": f"{env_prefix} openclaw browser status --json",
+                    "description": "查看新版浏览器运行态、当前 profile 和实时 attach 状态。",
+                },
+                {
+                    "label": "Browser Profiles",
+                    "command": f"{env_prefix} openclaw browser profiles --json",
+                    "description": "查看可用的浏览器 profiles，重点关注 `user` 和 `chrome-relay`。",
                 },
                 {
                     "label": "原生 Skills",
@@ -7803,7 +8519,690 @@ def load_openclaw_control_data(openclaw_dir):
     return cached_payload(("openclaw-control", str(openclaw_dir)), 30, build)
 
 
-def build_management_data(openclaw_dir, task_index, conversation_data, deliverables, now):
+def agent_response_latency_samples(openclaw_dir, agent_id, limit=8):
+    sessions_dir = Path(openclaw_dir) / "agents" / str(agent_id or "").strip() / "sessions"
+    if not sessions_dir.exists():
+        return []
+    samples = []
+    session_files = sorted(
+        sessions_dir.glob("*.jsonl"),
+        key=lambda item: item.stat().st_mtime if item.exists() else 0,
+        reverse=True,
+    )[:3]
+    for path in session_files:
+        pending_user_at = None
+        with path.open("r", encoding="utf-8", errors="replace") as handle:
+            tail_lines = list(deque(handle, maxlen=140))
+        for raw in tail_lines:
+            line = raw.strip()
+            if not line:
+                continue
+            try:
+                entry = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if entry.get("type") != "message":
+                continue
+            payload = entry.get("message", {}) if isinstance(entry.get("message"), dict) else {}
+            role = payload.get("role")
+            at = parse_iso(entry.get("timestamp") or payload.get("timestamp"))
+            if not at:
+                continue
+            if role == "user":
+                pending_user_at = at
+            elif role == "assistant" and pending_user_at:
+                delta = max((at - pending_user_at).total_seconds(), 0)
+                samples.append(delta)
+                pending_user_at = None
+    return samples[-limit:]
+
+
+def compute_agent_health_data(openclaw_dir, agents, task_index, deliverables, now):
+    completed_by_agent = Counter()
+    recent_completed_by_agent = Counter()
+    for task in task_index:
+        if str(task.get("state", "")).lower() not in TERMINAL_STATES:
+            continue
+        agent_id = task.get("currentAgent") or ""
+        if not agent_id:
+            continue
+        completed_by_agent[agent_id] += 1
+        updated_dt = parse_iso(task.get("updatedAt"))
+        if updated_dt and updated_dt >= now - timedelta(days=7):
+            recent_completed_by_agent[agent_id] += 1
+
+    cards = []
+    score_bands = {"excellent": 0, "stable": 0, "watch": 0, "critical": 0}
+    for agent in agents:
+        latency_samples = agent_response_latency_samples(openclaw_dir, agent.get("id"))
+        avg_latency_seconds = round(sum(latency_samples) / len(latency_samples), 1) if latency_samples else 0.0
+        active = int(agent.get("activeTasks") or 0)
+        blocked = int(agent.get("blockedTasks") or 0)
+        completed = recent_completed_by_agent[agent.get("id")] or completed_by_agent[agent.get("id")]
+        throughput_base = max(active + blocked + completed, 1)
+        completion_rate = round((completed / throughput_base) * 100)
+        block_rate = round((blocked / throughput_base) * 100)
+        if not latency_samples:
+            latency_score = 72
+        elif avg_latency_seconds <= 90:
+            latency_score = 96
+        elif avg_latency_seconds <= 240:
+            latency_score = 86
+        elif avg_latency_seconds <= 480:
+            latency_score = 70
+        else:
+            latency_score = 52
+        completion_score = min(100, 50 + completion_rate)
+        block_score = max(24, 100 - block_rate)
+        score = round(latency_score * 0.25 + completion_score * 0.45 + block_score * 0.30)
+        if score >= 85:
+            band = "excellent"
+        elif score >= 70:
+            band = "stable"
+        elif score >= 55:
+            band = "watch"
+        else:
+            band = "critical"
+        score_bands[band] += 1
+        cards.append(
+            {
+                "id": agent.get("id"),
+                "title": agent.get("title") or agent.get("id"),
+                "status": agent.get("status"),
+                "score": score,
+                "band": band,
+                "activeTasks": active,
+                "blockedTasks": blocked,
+                "completedTasks7d": completed,
+                "completionRate": completion_rate,
+                "blockRate": block_rate,
+                "avgResponseSeconds": avg_latency_seconds,
+                "handoffs24h": int(agent.get("handoffs24h") or 0),
+                "focus": agent.get("focus", ""),
+                "lastSeenAgo": agent.get("lastSeenAgo", ""),
+            }
+        )
+    cards.sort(key=lambda item: (-item["score"], item["blockedTasks"], item["title"]))
+    summary = {
+        "averageScore": round(sum(item["score"] for item in cards) / len(cards)) if cards else 0,
+        "excellent": score_bands["excellent"],
+        "stable": score_bands["stable"],
+        "watch": score_bands["watch"],
+        "critical": score_bands["critical"],
+    }
+    return {"summary": summary, "agents": cards}
+
+
+def build_operational_reports(task_index, relays, events, management_runs, health_data, now):
+    daily = []
+    for offset in range(6, -1, -1):
+        day_start = (now - timedelta(days=offset)).replace(hour=0, minute=0, second=0, microsecond=0)
+        day_end = day_start + timedelta(days=1)
+        completed = 0
+        blocked = 0
+        signals = 0
+        for task in task_index:
+            updated_dt = parse_iso(task.get("updatedAt"))
+            if not updated_dt or not (day_start <= updated_dt < day_end):
+                continue
+            state = str(task.get("state", "")).lower()
+            if state in TERMINAL_STATES:
+                completed += 1
+            if task.get("blocked"):
+                blocked += 1
+        for event in events:
+            event_dt = parse_iso(event.get("at"))
+            if event_dt and day_start <= event_dt < day_end:
+                signals += 1
+        daily.append(
+            {
+                "date": day_start.strftime("%m-%d"),
+                "completed": completed,
+                "blocked": blocked,
+                "signals": signals,
+            }
+        )
+
+    bottlenecks = []
+    for agent in (health_data.get("agents") or [])[:6]:
+        if agent.get("blockedTasks") or agent.get("band") in {"watch", "critical"}:
+            bottlenecks.append(
+                {
+                    "title": agent["title"],
+                    "detail": f"阻塞 {agent['blockedTasks']} · 完成率 {agent['completionRate']}%",
+                    "type": "agent",
+                }
+            )
+    stage_counter = Counter(run.get("stageKey", "unknown") for run in management_runs if run.get("status") == "blocked")
+    for stage_key, count in stage_counter.most_common(3):
+        bottlenecks.append(
+            {
+                "title": f"{stage_key} 阶段阻塞",
+                "detail": f"{count} 条管理 Run 目前卡在这里",
+                "type": "stage",
+            }
+        )
+    relay_leaders = [
+        {
+            "route": f"{item.get('from')} -> {item.get('to')}",
+            "count": item.get("count", 0),
+            "lastAgo": item.get("lastAgo", ""),
+        }
+        for item in (relays or [])[:5]
+    ]
+    return {
+        "daily": daily,
+        "weekly": {
+            "completed": sum(item["completed"] for item in daily),
+            "blockedTouches": sum(item["blocked"] for item in daily),
+            "signals": sum(item["signals"] for item in daily),
+            "relayCount": sum(item.get("count", 0) for item in relays),
+        },
+        "bottlenecks": bottlenecks[:6],
+        "relayLeaders": relay_leaders,
+    }
+
+
+def summarize_notification_target(channel):
+    channel_type = str((channel or {}).get("type") or "").strip().lower()
+    target = str((channel or {}).get("target") or "").strip()
+    if channel_type == "telegram":
+        return target or "Telegram chat"
+    if channel_type == "feishu":
+        return target or "Feishu webhook"
+    return target or "Webhook"
+
+
+def recommended_management_rules():
+    return [
+        {
+            "name": "阻塞超过 30 分钟自动升级",
+            "description": "当任务阻塞超过 30 分钟时，自动生成运营告警，提醒负责人介入。",
+            "triggerType": "blocked_task_timeout",
+            "thresholdMinutes": 30,
+            "cooldownMinutes": 90,
+            "severity": "warning",
+            "matchText": "",
+            "status": "active",
+            "channelIds": [],
+        },
+        {
+            "name": "S 级任务完成自动通知",
+            "description": "关键任务完成后，自动向运营群同步结果。",
+            "triggerType": "critical_task_done",
+            "thresholdMinutes": 0,
+            "cooldownMinutes": 240,
+            "severity": "critical",
+            "matchText": "S级",
+            "status": "active",
+            "channelIds": [],
+        },
+        {
+            "name": "Agent 离线超过 20 分钟提醒",
+            "description": "当核心 Agent 长时间没有新信号时，自动发出巡检提醒。",
+            "triggerType": "agent_offline",
+            "thresholdMinutes": 20,
+            "cooldownMinutes": 60,
+            "severity": "warning",
+            "matchText": "",
+            "status": "active",
+            "channelIds": [],
+        },
+    ]
+
+
+def bootstrap_management_rules(openclaw_dir):
+    existing = store_list_automation_rules(openclaw_dir)
+    existing_names = {item.get("name", "") for item in existing}
+    created = []
+    for payload in recommended_management_rules():
+        if payload["name"] in existing_names:
+            continue
+        created.append(store_save_automation_rule(openclaw_dir, payload))
+    return {"created": created, "total": len(created)}
+
+
+def render_management_weekly_report(openclaw_dir, management, theme, generated_at):
+    report = management.get("reports", {}) if isinstance(management, dict) else {}
+    health = management.get("agentHealth", {}) if isinstance(management, dict) else {}
+    automation = management.get("automation", {}) if isinstance(management, dict) else {}
+    weekly = report.get("weekly", {}) if isinstance(report, dict) else {}
+    lines = [
+        "# Mission Control Weekly Ops Report",
+        "",
+        f"- Generated At: {generated_at}",
+        f"- Theme: {theme.get('displayName', theme.get('name', 'unknown')) if isinstance(theme, dict) else 'unknown'}",
+        "",
+        "## Weekly Summary",
+        "",
+        f"- Completed Tasks: {weekly.get('completed', 0)}",
+        f"- Blocked Touches: {weekly.get('blockedTouches', 0)}",
+        f"- Activity Signals: {weekly.get('signals', 0)}",
+        f"- Relay Count: {weekly.get('relayCount', 0)}",
+        f"- Average Agent Health: {(health.get('summary') or {}).get('averageScore', 0)} / 100",
+        f"- Active Rules: {(automation.get('summary') or {}).get('activeRules', 0)}",
+        f"- Open Alerts: {(automation.get('summary') or {}).get('openAlerts', 0)}",
+        "",
+        "## Top Bottlenecks",
+        "",
+    ]
+    bottlenecks = report.get("bottlenecks", []) if isinstance(report, dict) else []
+    if bottlenecks:
+        for item in bottlenecks:
+            lines.append(f"- {item.get('title', 'Unknown')}: {item.get('detail', '')}")
+    else:
+        lines.append("- No major bottlenecks were detected this week.")
+    lines.extend(["", "## Relay Leaders", ""])
+    relay_leaders = report.get("relayLeaders", []) if isinstance(report, dict) else []
+    if relay_leaders:
+        for item in relay_leaders:
+            lines.append(f"- {item.get('route', 'Unknown')}: {item.get('count', 0)} handoffs, last {item.get('lastAgo', 'unknown')}")
+    else:
+        lines.append("- No standout relay routes this week.")
+    lines.extend(["", "## Agent Health", ""])
+    for agent in (health.get("agents", []) if isinstance(health, dict) else [])[:8]:
+        lines.append(
+            f"- {agent.get('title', 'Agent')}: score {agent.get('score', 0)}, completion {agent.get('completionRate', 0)}%, blocked {agent.get('blockedTasks', 0)}, avg response {agent.get('avgResponseSeconds', 0)}s"
+        )
+    return "\n".join(lines).strip() + "\n"
+
+
+def export_management_weekly_report(openclaw_dir):
+    data = build_dashboard_data(openclaw_dir)
+    output_path = dashboard_dir(openclaw_dir) / "weekly-ops-report.md"
+    output_path.write_text(
+        render_management_weekly_report(openclaw_dir, data.get("management", {}), data.get("theme", {}), data.get("generatedAt", now_iso())),
+        encoding="utf-8",
+    )
+    return {"path": str(output_path), "generatedAt": data.get("generatedAt", now_iso())}
+
+
+def default_orchestration_workflow(agents, router_agent_id):
+    preferred_order = [router_agent_id] + [agent.get("id") for agent in agents if agent.get("id") != router_agent_id]
+    picked = [item for item in preferred_order if item][:4]
+    lane_defs = [
+        {"id": "intake", "title": "Intake", "subtitle": "需求进入与分拣"},
+        {"id": "build", "title": "Engineering", "subtitle": "方案与执行"},
+        {"id": "quality", "title": "Quality", "subtitle": "审议与验收"},
+        {"id": "ops", "title": "Ops", "subtitle": "发布与运营收口"},
+    ]
+    nodes = []
+    for index, lane in enumerate(lane_defs):
+        agent_id = picked[index] if index < len(picked) else (picked[-1] if picked else "")
+        nodes.append(
+            {
+                "id": f"node-{lane['id']}",
+                "laneId": lane["id"],
+                "title": lane["title"],
+                "agentId": agent_id,
+                "handoffNote": "在产品中可视化调整此阶段的负责 Agent 与交接语义。",
+            }
+        )
+    return {
+        "id": "starter-workflow",
+        "name": "Starter Delivery Flow",
+        "description": "默认的工程 -> 质量 -> 运维闭环，可作为编排 IDE 的起点。",
+        "status": "draft",
+        "lanes": lane_defs,
+        "nodes": nodes,
+        "meta": {"starter": True},
+    }
+
+
+def summarize_context_packet(entry):
+    detail = str(entry.get("detail") or "").strip()
+    if entry.get("kind") == "handoff":
+        risk = "high" if not detail else ("watch" if len(detail) < 12 else "good")
+        summary = detail or "这次 handoff 没有写交接说明。"
+    else:
+        risk = "watch" if not detail else ("good" if len(detail) >= 18 else "watch")
+        summary = detail or "当前进展没有附带明确上下文。"
+    return {"summary": summary, "risk": risk}
+
+
+def build_orchestration_replay(task):
+    replay = sorted(
+        [item for item in (task.get("replay") or []) if isinstance(item, dict)],
+        key=lambda item: parse_iso(item.get("at")) or datetime.fromtimestamp(0, tz=timezone.utc),
+    )
+    if not replay:
+        return {
+            "taskId": task.get("id", ""),
+            "title": task.get("title", ""),
+            "entries": [],
+            "durationMinutes": 0,
+            "initiator": task.get("route", [task.get("currentAgentLabel", "")])[0] if task.get("route") else task.get("currentAgentLabel", ""),
+            "owner": task.get("currentAgentLabel", ""),
+            "contextLossCount": 0,
+        }
+    first_dt = parse_iso(replay[0].get("at"))
+    last_dt = parse_iso(replay[-1].get("at"))
+    entries = []
+    context_loss_count = 0
+    for index, entry in enumerate(replay):
+        next_dt = parse_iso(replay[index + 1].get("at")) if index + 1 < len(replay) else None
+        current_dt = parse_iso(entry.get("at"))
+        packet = summarize_context_packet(entry)
+        if packet["risk"] != "good":
+            context_loss_count += 1
+        entries.append(
+            {
+                **entry,
+                "durationToNextMinutes": round(max((next_dt - current_dt).total_seconds(), 0) / 60, 1) if current_dt and next_dt else 0,
+                "contextPacket": packet,
+            }
+        )
+    return {
+        "taskId": task.get("id", ""),
+        "title": task.get("title", ""),
+        "entries": entries,
+        "durationMinutes": round(max((last_dt - first_dt).total_seconds(), 0) / 60, 1) if first_dt and last_dt else 0,
+        "initiator": (replay[0].get("actorLabel") or task.get("route", [""])[0] or task.get("currentAgentLabel", "")).strip(),
+        "owner": task.get("currentAgentLabel", ""),
+        "contextLossCount": context_loss_count,
+    }
+
+
+def build_orchestration_data(openclaw_dir, agents, task_index, router_agent_id, now):
+    workflows = store_list_orchestration_workflows(openclaw_dir)
+    routing_policies = store_list_routing_policies(openclaw_dir)
+    if not workflows:
+        workflows = [default_orchestration_workflow(agents, router_agent_id)]
+    replays = []
+    for task in task_index[:24]:
+        if not task.get("id"):
+            continue
+        replay = build_orchestration_replay(task)
+        replay.update(
+            {
+                "state": task.get("state", ""),
+                "updatedAgo": task.get("updatedAgo", ""),
+                "route": task.get("route", []),
+                "blocked": bool(task.get("blocked")),
+            }
+        )
+        replays.append(replay)
+    replays.sort(key=lambda item: item.get("durationMinutes", 0), reverse=True)
+
+    strategy_summary = Counter(policy.get("strategyType", "unknown") for policy in routing_policies)
+    context_hotspots = sorted(
+        [
+            {
+                "taskId": item.get("taskId", ""),
+                "title": item.get("title", ""),
+                "contextLossCount": item.get("contextLossCount", 0),
+                "owner": item.get("owner", ""),
+                "durationMinutes": item.get("durationMinutes", 0),
+            }
+            for item in replays
+            if item.get("contextLossCount", 0) > 0
+        ],
+        key=lambda item: (-item["contextLossCount"], -item["durationMinutes"]),
+    )[:8]
+    return {
+        "summary": {
+            "workflowCount": len(workflows),
+            "activePolicies": sum(1 for item in routing_policies if item.get("status") == "active"),
+            "replayCount": len(replays),
+            "contextLossHotspots": len(context_hotspots),
+            "strategyBreakdown": dict(strategy_summary),
+        },
+        "workflows": workflows,
+        "routingPolicies": routing_policies,
+        "replays": replays[:18],
+        "contextHotspots": context_hotspots,
+        "commands": [
+            {
+                "label": "路由 Agent 现状",
+                "command": f'OPENCLAW_STATE_DIR="{openclaw_dir}" openclaw agent --agent {router_agent_id} --message "summarize routing policy" --json',
+                "description": "直接向当前路由 Agent 询问现有调度逻辑。",
+            }
+        ],
+    }
+
+
+def send_notification_message(channel, alert):
+    channel_type = str(channel.get("type") or "").strip().lower()
+    target = str(channel.get("target") or "").strip()
+    secret = str(channel.get("secret") or "").strip()
+    title = str(alert.get("title") or "Mission Control Alert").strip()
+    detail = str(alert.get("detail") or "").strip()
+    message = f"{title}\n{detail}".strip()
+
+    if target.startswith("fixture://"):
+        return {"ok": True, "detail": f"fixture delivered to {target}"}
+
+    if channel_type == "telegram":
+        if not secret or not target:
+            raise RuntimeError("Telegram 通知需要 bot token 和 chat id。")
+        request = Request(
+            f"https://api.telegram.org/bot{secret}/sendMessage",
+            data=json.dumps({"chat_id": target, "text": message}).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+    elif channel_type == "feishu":
+        if not target:
+            raise RuntimeError("飞书通知需要 webhook 地址。")
+        request = Request(
+            target,
+            data=json.dumps({"msg_type": "text", "content": {"text": message}}).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+    elif channel_type == "webhook":
+        if not target:
+            raise RuntimeError("Webhook 通知需要 URL。")
+        request = Request(
+            target,
+            data=json.dumps({"title": title, "text": detail, "alert": alert}, ensure_ascii=False).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+    else:
+        raise RuntimeError(f"不支持的通知类型: {channel_type}")
+
+    try:
+        with urlopen(request, timeout=8) as response:
+            body = response.read().decode("utf-8", "replace")
+            return {"ok": 200 <= response.status < 300, "detail": body[:320] or f"HTTP {response.status}"}
+    except HTTPError as error:
+        raise RuntimeError(f"通知推送失败: HTTP {error.code}") from error
+    except URLError as error:
+        raise RuntimeError(f"通知推送失败: {error.reason}") from error
+
+
+def evaluate_automation_rules(openclaw_dir, task_index, agents, management_runs, now):
+    rules = store_list_automation_rules(openclaw_dir)
+    channels = {item["id"]: item for item in store_list_notification_channels(openclaw_dir)}
+    existing_deliveries = store_list_notification_deliveries(openclaw_dir, limit=240)
+    delivery_map = {(item.get("alertId"), item.get("channelId")): item for item in existing_deliveries}
+    rule_map = {item["id"]: item for item in rules}
+    active_keys_by_rule = defaultdict(set)
+    triggered = []
+
+    for rule in rules:
+        if rule.get("status") != "active":
+            continue
+        trigger_type = rule.get("triggerType")
+        threshold_minutes = int(rule.get("thresholdMinutes") or 0)
+        match_text = str(rule.get("matchText") or "").strip().lower()
+        if trigger_type == "blocked_task_timeout":
+            for task in task_index:
+                updated_dt = parse_iso(task.get("updatedAt"))
+                if not task.get("blocked") or not updated_dt:
+                    continue
+                age_minutes = int((now - updated_dt).total_seconds() // 60)
+                if age_minutes < threshold_minutes:
+                    continue
+                active_keys_by_rule[rule["id"]].add(task["id"])
+                alert = store_upsert_automation_alert(
+                    openclaw_dir,
+                    {
+                        "ruleId": rule["id"],
+                        "eventKey": task["id"],
+                        "title": f"任务 {task['id']} 已阻塞 {age_minutes} 分钟",
+                        "detail": task.get("title") or "需要介入处理的阻塞任务。",
+                        "severity": rule.get("severity", "warning"),
+                        "status": "open",
+                        "sourceType": "task",
+                        "sourceId": task["id"],
+                        "meta": {"ageMinutes": age_minutes, "triggerType": trigger_type},
+                    },
+                )
+                triggered.append(alert)
+        elif trigger_type == "critical_task_done":
+            for task in task_index:
+                updated_dt = parse_iso(task.get("updatedAt"))
+                if str(task.get("state", "")).lower() not in TERMINAL_STATES or not updated_dt:
+                    continue
+                if updated_dt < now - timedelta(days=1):
+                    continue
+                haystack = f"{task.get('id', '')} {task.get('title', '')}".lower()
+                if match_text and match_text not in haystack:
+                    continue
+                active_keys_by_rule[rule["id"]].add(task["id"])
+                alert = store_upsert_automation_alert(
+                    openclaw_dir,
+                    {
+                        "ruleId": rule["id"],
+                        "eventKey": task["id"],
+                        "title": f"关键任务 {task['id']} 已完成",
+                        "detail": task.get("title") or "关键任务完成，建议同步通知。",
+                        "severity": rule.get("severity", "critical"),
+                        "status": "open",
+                        "sourceType": "task",
+                        "sourceId": task["id"],
+                        "meta": {"triggerType": trigger_type},
+                    },
+                )
+                triggered.append(alert)
+        elif trigger_type == "agent_offline":
+            for agent in agents:
+                if agent.get("status") not in {"idle", "blocked"}:
+                    continue
+                if not agent.get("lastSeenAt"):
+                    continue
+                last_seen = parse_iso(agent.get("lastSeenAt"))
+                if not last_seen:
+                    continue
+                age_minutes = int((now - last_seen).total_seconds() // 60)
+                if age_minutes < threshold_minutes:
+                    continue
+                active_keys_by_rule[rule["id"]].add(agent["id"])
+                alert = store_upsert_automation_alert(
+                    openclaw_dir,
+                    {
+                        "ruleId": rule["id"],
+                        "eventKey": agent["id"],
+                        "title": f"Agent {agent['title']} 失去信号 {age_minutes} 分钟",
+                        "detail": agent.get("focus") or "最近没有新的工作信号，请确认运行状态。",
+                        "severity": rule.get("severity", "warning"),
+                        "status": "open",
+                        "sourceType": "agent",
+                        "sourceId": agent["id"],
+                        "meta": {"ageMinutes": age_minutes, "triggerType": trigger_type},
+                    },
+                )
+                triggered.append(alert)
+
+    for rule in rules:
+        store_resolve_automation_alerts(openclaw_dir, rule.get("id"), active_keys_by_rule.get(rule.get("id"), set()))
+
+    alerts = store_list_automation_alerts(openclaw_dir, limit=80)
+    deliveries = store_list_notification_deliveries(openclaw_dir, limit=200)
+    delivery_by_alert = defaultdict(list)
+    for delivery in deliveries:
+        delivery_by_alert[delivery.get("alertId")].append(delivery)
+
+    for alert in alerts:
+        rule = rule_map.get(alert.get("ruleId"))
+        if not rule or alert.get("status") == "resolved":
+            continue
+        channel_ids = [item for item in rule.get("channelIds", []) if channels.get(item, {}).get("status") == "active"]
+        any_success = False
+        for channel_id in channel_ids:
+            pair = (alert.get("id"), channel_id)
+            prior_delivery = delivery_map.get(pair)
+            cooldown_minutes = int(rule.get("cooldownMinutes") or 0)
+            if prior_delivery:
+                delivered_at = parse_iso(prior_delivery.get("deliveredAt"))
+                within_cooldown = delivered_at and cooldown_minutes > 0 and now - delivered_at < timedelta(minutes=cooldown_minutes)
+                if prior_delivery.get("outcome") == "success" and within_cooldown:
+                    any_success = True
+                    continue
+            channel = channels.get(channel_id)
+            if not channel:
+                continue
+            try:
+                result = send_notification_message(channel, alert)
+                outcome = "success" if result.get("ok") else "error"
+                detail = result.get("detail", "")
+            except Exception as error:
+                outcome = "error"
+                detail = str(error)
+            delivery = store_save_notification_delivery(
+                openclaw_dir,
+                alert["id"],
+                channel_id,
+                outcome,
+                detail=detail,
+                meta={"channelType": channel.get("type", "")},
+            )
+            delivery_by_alert[alert.get("id")].append(delivery)
+            delivery_map[pair] = delivery
+            if outcome == "success":
+                any_success = True
+        if any_success and alert.get("status") != "notified":
+            store_upsert_automation_alert(
+                openclaw_dir,
+                {
+                    "id": alert["id"],
+                    "ruleId": alert["ruleId"],
+                    "eventKey": alert["eventKey"],
+                    "title": alert["title"],
+                    "detail": alert["detail"],
+                    "severity": alert["severity"],
+                    "status": "notified",
+                    "sourceType": alert.get("sourceType", ""),
+                    "sourceId": alert.get("sourceId", ""),
+                    "triggeredAt": alert.get("triggeredAt", now_iso()),
+                    "meta": alert.get("meta", {}),
+                },
+            )
+
+    refreshed_alerts = store_list_automation_alerts(openclaw_dir, limit=80)
+    refreshed_deliveries = store_list_notification_deliveries(openclaw_dir, limit=200)
+    recent = []
+    for alert in refreshed_alerts[:12]:
+        deliveries_for_alert = [item for item in refreshed_deliveries if item.get("alertId") == alert.get("id")]
+        recent.append(
+            {
+                **alert,
+                "ruleName": (rule_map.get(alert.get("ruleId")) or {}).get("name", ""),
+                "deliveries": [
+                    {
+                        **item,
+                        "channelName": (channels.get(item.get("channelId")) or {}).get("name", item.get("channelId", "")),
+                    }
+                    for item in deliveries_for_alert
+                ],
+            }
+        )
+    return {
+        "rules": rules,
+        "channels": list(channels.values()),
+        "alerts": recent,
+        "summary": {
+            "activeRules": sum(1 for item in rules if item.get("status") == "active"),
+            "openAlerts": sum(1 for item in refreshed_alerts if item.get("status") in {"open", "error"}),
+            "notifiedAlerts": sum(1 for item in refreshed_alerts if item.get("status") == "notified"),
+            "activeChannels": sum(1 for item in channels.values() if item.get("status") == "active"),
+        },
+    }
+
+
+def build_management_data(openclaw_dir, task_index, conversation_data, deliverables, agents, events, relays, now):
     task_map = {item.get("id"): item for item in task_index if item.get("id")}
     deliverable_map = {item.get("id"): item for item in deliverables if item.get("id")}
     session_map = {
@@ -7835,6 +9234,21 @@ def build_management_data(openclaw_dir, task_index, conversation_data, deliverab
                 "deliverable": deliverable_map.get(run.get("linkedTaskId")),
             }
         )
+    health_data = cached_payload(
+        ("management-health", str(openclaw_dir)),
+        20,
+        lambda: compute_agent_health_data(openclaw_dir, agents, task_index, deliverables, now),
+    )
+    reports = cached_payload(
+        ("management-reports", str(openclaw_dir)),
+        20,
+        lambda: build_operational_reports(task_index, relays, events, runs, health_data, now),
+    )
+    automation = cached_payload(
+        ("management-automation", str(openclaw_dir)),
+        15,
+        lambda: evaluate_automation_rules(openclaw_dir, task_index, agents, runs, now),
+    )
     return {
         "summary": {
             "total": len(runs),
@@ -7847,6 +9261,9 @@ def build_management_data(openclaw_dir, task_index, conversation_data, deliverab
             "riskBreakdown": dict(risk_counter),
         },
         "runs": runs,
+        "agentHealth": health_data,
+        "reports": reports,
+        "automation": automation,
     }
 
 
@@ -8055,6 +9472,8 @@ class CollaborationDashboardHandler(BaseHTTPRequestHandler):
         "/login",
         "/overview",
         "/management",
+        "/orchestration",
+        "/context",
         "/agents",
         "/tasks",
         "/conversations",
@@ -8108,7 +9527,7 @@ class CollaborationDashboardHandler(BaseHTTPRequestHandler):
         for key, value in headers:
             self.send_header(key, value)
         self.send_header("Access-Control-Allow-Methods", "GET,POST,OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-API-Key")
         self.send_header("Access-Control-Max-Age", "600")
         self.send_header("Cache-Control", "no-store, no-cache, must-revalidate")
         self.end_headers()
@@ -8240,6 +9659,73 @@ class CollaborationDashboardHandler(BaseHTTPRequestHandler):
     def _can(self, permission_key):
         return bool(self._permissions().get(permission_key))
 
+    def _api_key_value(self):
+        auth_header = str(self.headers.get("Authorization", "")).strip()
+        if auth_header.lower().startswith("bearer "):
+            return auth_header.split(" ", 1)[1].strip()
+        return str(self.headers.get("X-API-Key", "")).strip()
+
+    def _api_key_record(self):
+        cached = getattr(self, "_cached_api_key_record", None)
+        if cached is not None:
+            return cached
+        raw_key = self._api_key_value()
+        if not raw_key:
+            self._cached_api_key_record = None
+            return None
+        record = store_resolve_tenant_api_key(self.server.openclaw_dir, raw_key)
+        if record:
+            store_touch_tenant_api_key(self.server.openclaw_dir, record.get("id", ""))
+        self._cached_api_key_record = record
+        return record
+
+    def _current_actor(self):
+        session = self._session()
+        if session:
+            return actor_from_session(session)
+        api_key = self._api_key_record()
+        if api_key:
+            return {
+                "displayName": api_key.get("name") or api_key.get("prefix", "Tenant API Key"),
+                "username": api_key.get("tenantId", "tenant-api"),
+                "role": "owner",
+                "kind": "api_key",
+            }
+        return {"displayName": "anonymous", "username": "anonymous", "role": "viewer", "kind": "anonymous"}
+
+    def _rest_auth_context(self, required_scope="", tenant_ref=""):
+        api_key = self._api_key_record()
+        tenant = find_tenant_record(self.server.openclaw_dir, tenant_ref) if tenant_ref else None
+        if api_key:
+            if required_scope and not api_scope_allows(api_key.get("scopes", []), required_scope):
+                self._send_json({"ok": False, "error": "permission_denied", "message": "API Key 没有访问当前资源的 scope。"}, status=403)
+                return None
+            if tenant and api_key.get("tenantId") != tenant.get("id"):
+                self._send_json({"ok": False, "error": "permission_denied", "message": "API Key 不能访问其他租户的数据。"}, status=403)
+                return None
+            if tenant_ref and not tenant:
+                self._send_json({"ok": False, "error": "not_found", "message": "租户不存在。"}, status=404)
+                return None
+            return {"mode": "api_key", "apiKey": api_key, "tenant": tenant}
+        if not self._is_authenticated():
+            self._send_json({"ok": False, "error": "auth_required", "message": "请先登录或提供 API Key。"}, status=401)
+            return None
+        if not (self._can("adminWrite") or self._can("auditView")):
+            self._send_json({"ok": False, "error": "permission_denied", "message": "当前账号没有租户平台访问权限。"}, status=403)
+            return None
+        if tenant_ref and not tenant:
+            self._send_json({"ok": False, "error": "not_found", "message": "租户不存在。"}, status=404)
+            return None
+        return {"mode": "session", "tenant": tenant}
+
+    def _tenant_openclaw_dir(self, tenant):
+        tenant_dir = tenant_primary_openclaw_dir(self.server.openclaw_dir, tenant)
+        if not tenant_dir:
+            raise RuntimeError("租户还没有绑定可用的 OpenClaw 安装。")
+        if not tenant_dir.exists():
+            raise RuntimeError(f"租户安装目录不存在：{tenant_dir}")
+        return tenant_dir
+
     def _login_cookie_header(self, session_data):
         auth_token = getattr(self.server, "dashboard_auth_token", "")
         return (
@@ -8273,7 +9759,7 @@ class CollaborationDashboardHandler(BaseHTTPRequestHandler):
         return append_audit_event(
             self.server.openclaw_dir,
             action,
-            actor_from_session(self._session()),
+            self._current_actor(),
             outcome=outcome,
             detail=detail,
             meta=meta,
@@ -8455,6 +9941,107 @@ class CollaborationDashboardHandler(BaseHTTPRequestHandler):
         self._cached_session = None
         self._send_redirect(next_path, extra_headers=[self._clear_cookie_header()])
 
+    def _handle_rest_get(self, path):
+        try:
+            if path == "/api/v1/tenants":
+                context = self._rest_auth_context(required_scope="tenant:read")
+                if not context:
+                    return True
+                tenant_admin = build_tenant_admin_data(self.server.openclaw_dir, now_utc())
+                if context.get("mode") == "api_key":
+                    tenant = context.get("tenant") or find_tenant_record(self.server.openclaw_dir, context["apiKey"].get("tenantId", ""))
+                    items = [item for item in tenant_admin["items"] if item.get("id") == (tenant or {}).get("id")]
+                else:
+                    items = tenant_admin["items"]
+                self._send_json({"ok": True, "tenants": items, "summary": tenant_admin["summary"]})
+                return True
+
+            parts = [segment for segment in path.split("/") if segment]
+            if len(parts) < 5 or parts[:3] != ["api", "v1", "tenants"]:
+                return False
+            tenant_ref = parts[3]
+            resource = parts[4]
+            scope_map = {
+                "dashboard": "dashboard:read",
+                "tasks": "tasks:read",
+                "agents": "agents:read",
+                "management": "tenant:read",
+            }
+            context = self._rest_auth_context(required_scope=scope_map.get(resource, "tenant:read"), tenant_ref=tenant_ref)
+            if not context:
+                return True
+            tenant = context.get("tenant")
+            tenant_dir = self._tenant_openclaw_dir(tenant)
+            dashboard = build_dashboard_data(tenant_dir)
+            tenant_payload = {
+                "id": tenant.get("id"),
+                "name": tenant.get("name"),
+                "slug": tenant.get("slug"),
+                "status": tenant.get("status"),
+                "primaryOpenclawDir": str(tenant_dir),
+            }
+            if resource == "dashboard":
+                self._send_json({"ok": True, "tenant": tenant_payload, "dashboard": dashboard})
+                return True
+            if resource == "tasks":
+                self._send_json({"ok": True, "tenant": tenant_payload, "tasks": dashboard.get("taskIndex", [])})
+                return True
+            if resource == "agents":
+                self._send_json({"ok": True, "tenant": tenant_payload, "agents": dashboard.get("agents", [])})
+                return True
+            if resource == "management":
+                self._send_json({"ok": True, "tenant": tenant_payload, "management": dashboard.get("management", {})})
+                return True
+            self._send_json({"ok": False, "error": "not_found", "message": "未知 REST 资源。"}, status=404)
+            return True
+        except RuntimeError as error:
+            self._send_json({"ok": False, "error": "rest_failed", "message": str(error)}, status=400)
+            return True
+
+    def _handle_rest_post(self, path):
+        try:
+            parts = [segment for segment in path.split("/") if segment]
+            if len(parts) < 5 or parts[:3] != ["api", "v1", "tenants"]:
+                return False
+            tenant_ref = parts[3]
+            resource = parts[4]
+            try:
+                payload = self._read_json_body()
+            except json.JSONDecodeError:
+                self._send_json({"ok": False, "error": "invalid_json", "message": "请求体不是合法 JSON。"}, status=400)
+                return True
+            context = self._rest_auth_context(required_scope="tasks:write", tenant_ref=tenant_ref)
+            if not context:
+                return True
+            tenant = context.get("tenant")
+            tenant_dir = self._tenant_openclaw_dir(tenant)
+            if resource == "tasks":
+                title = str(payload.get("title", "")).strip()
+                remark = str(payload.get("remark", "")).strip()
+                if not title:
+                    self._send_json({"ok": False, "error": "missing_title", "message": "任务标题不能为空。"}, status=400)
+                    return True
+                task_id = perform_task_create(tenant_dir, title, remark=remark)
+                self._audit(
+                    "tenant_task_create",
+                    detail=f"通过开放 API 为租户 {tenant.get('name', tenant.get('id', ''))} 创建任务 {task_id}",
+                    meta={"tenantId": tenant.get("id", ""), "taskId": task_id, "title": title},
+                )
+                self._send_json(
+                    {
+                        "ok": True,
+                        "tenant": {"id": tenant.get("id"), "name": tenant.get("name"), "slug": tenant.get("slug")},
+                        "taskId": task_id,
+                        "message": f"任务 {task_id} 已进入租户协同链路。",
+                    }
+                )
+                return True
+            self._send_json({"ok": False, "error": "not_found", "message": "未知 REST 写入资源。"}, status=404)
+            return True
+        except RuntimeError as error:
+            self._send_json({"ok": False, "error": "rest_failed", "message": str(error)}, status=400)
+            return True
+
     def _handle_action_post(self, path):
         try:
             payload = self._read_json_body()
@@ -8620,6 +10207,214 @@ class CollaborationDashboardHandler(BaseHTTPRequestHandler):
                 )
                 return
 
+            if path == "/api/actions/management/rule/save":
+                if not self._require_capability("taskWrite", "当前账号没有配置自动化规则的权限。"):
+                    return
+                name = str(payload.get("name", "")).strip()
+                trigger_type = str(payload.get("triggerType", "")).strip()
+                if not name or not trigger_type:
+                    raise RuntimeError("请填写规则名称和触发类型。")
+                rule = store_save_automation_rule(
+                    self.server.openclaw_dir,
+                    {
+                        "id": str(payload.get("id", "")).strip(),
+                        "name": name,
+                        "description": str(payload.get("description", "")).strip(),
+                        "status": str(payload.get("status", "")).strip() or "active",
+                        "triggerType": trigger_type,
+                        "thresholdMinutes": int(payload.get("thresholdMinutes") or 0),
+                        "cooldownMinutes": int(payload.get("cooldownMinutes") or 60),
+                        "severity": str(payload.get("severity", "")).strip() or "warning",
+                        "matchText": str(payload.get("matchText", "")).strip(),
+                        "channelIds": payload.get("channelIds") if isinstance(payload.get("channelIds"), list) else [],
+                    },
+                )
+                self._audit(
+                    "management_rule_save",
+                    detail=f"保存自动化规则 {rule['name']}",
+                    meta={"ruleId": rule["id"], "triggerType": rule["triggerType"]},
+                )
+                data, _paths = self._refreshed_bundle()
+                self._send_json(
+                    {
+                        "ok": True,
+                        "message": f"自动化规则 {rule['name']} 已保存。",
+                        "rule": rule,
+                        "dashboard": data,
+                    }
+                )
+                return
+
+            if path == "/api/actions/management/channel/save":
+                if not self._require_capability("adminWrite", "当前账号没有配置通知渠道的权限。"):
+                    return
+                name = str(payload.get("name", "")).strip()
+                channel_type = str(payload.get("type", "")).strip()
+                if not name or not channel_type:
+                    raise RuntimeError("请填写通知渠道名称和类型。")
+                channel = store_save_notification_channel(
+                    self.server.openclaw_dir,
+                    {
+                        "id": str(payload.get("id", "")).strip(),
+                        "name": name,
+                        "type": channel_type,
+                        "status": str(payload.get("status", "")).strip() or "active",
+                        "target": str(payload.get("target", "")).strip(),
+                        "secret": str(payload.get("secret", "")).strip(),
+                    },
+                )
+                self._audit(
+                    "management_channel_save",
+                    detail=f"保存通知渠道 {channel['name']}",
+                    meta={"channelId": channel["id"], "type": channel["type"]},
+                )
+                data, _paths = self._refreshed_bundle()
+                self._send_json(
+                    {
+                        "ok": True,
+                        "message": f"通知渠道 {channel['name']} 已保存。",
+                        "channel": channel,
+                        "dashboard": data,
+                    }
+                )
+                return
+
+            if path == "/api/actions/management/channel/test":
+                if not self._require_capability("adminWrite", "当前账号没有测试通知渠道的权限。"):
+                    return
+                channel = {
+                    "id": str(payload.get("id", "")).strip() or "ad-hoc",
+                    "name": str(payload.get("name", "")).strip() or "Test Channel",
+                    "type": str(payload.get("type", "")).strip(),
+                    "target": str(payload.get("target", "")).strip(),
+                    "secret": str(payload.get("secret", "")).strip(),
+                }
+                if not channel["type"]:
+                    raise RuntimeError("请先选择通知渠道类型。")
+                result = send_notification_message(
+                    channel,
+                    {
+                        "title": "Mission Control Test Ping",
+                        "detail": "这是一条来自闭环运营中心的测试通知，说明渠道配置已经可用。",
+                    },
+                )
+                self._audit(
+                    "management_channel_test",
+                    detail=f"测试通知渠道 {channel['name']}",
+                    meta={"channelType": channel["type"], "target": summarize_notification_target(channel)},
+                )
+                self._send_json(
+                    {
+                        "ok": True,
+                        "message": f"测试通知已发送到 {summarize_notification_target(channel)}。",
+                        "result": result,
+                    }
+                )
+                return
+
+            if path == "/api/actions/management/bootstrap":
+                if not self._require_capability("taskWrite", "当前账号没有初始化运营规则的权限。"):
+                    return
+                result = bootstrap_management_rules(self.server.openclaw_dir)
+                self._audit(
+                    "management_bootstrap",
+                    detail="初始化默认闭环运营规则",
+                    meta={"created": result["total"]},
+                )
+                data, _paths = self._refreshed_bundle()
+                self._send_json(
+                    {
+                        "ok": True,
+                        "message": f"已补齐 {result['total']} 条默认运营规则。",
+                        "result": result,
+                        "dashboard": data,
+                    }
+                )
+                return
+
+            if path == "/api/actions/management/report/export":
+                if not self._require_capability("read", "当前账号没有导出运营周报的权限。"):
+                    return
+                report = export_management_weekly_report(self.server.openclaw_dir)
+                self._audit(
+                    "management_report_export",
+                    detail="导出运营周报",
+                    meta={"path": report["path"]},
+                )
+                data, _paths = self._refreshed_bundle()
+                self._send_json(
+                    {
+                        "ok": True,
+                        "message": f"运营周报已导出到 {report['path']}。",
+                        "report": report,
+                        "dashboard": data,
+                    }
+                )
+                return
+
+            if path == "/api/actions/orchestration/workflow/save":
+                if not self._require_capability("taskWrite", "当前账号没有编辑协作编排的权限。"):
+                    return
+                workflow = store_save_orchestration_workflow(
+                    self.server.openclaw_dir,
+                    {
+                        "id": str(payload.get("id", "")).strip(),
+                        "name": str(payload.get("name", "")).strip(),
+                        "description": str(payload.get("description", "")).strip(),
+                        "status": str(payload.get("status", "")).strip() or "active",
+                        "lanes": payload.get("lanes") if isinstance(payload.get("lanes"), list) else [],
+                        "nodes": payload.get("nodes") if isinstance(payload.get("nodes"), list) else [],
+                        "meta": payload.get("meta") if isinstance(payload.get("meta"), dict) else {},
+                    },
+                )
+                self._audit(
+                    "orchestration_workflow_save",
+                    detail=f"保存协作编排 {workflow['name']}",
+                    meta={"workflowId": workflow["id"], "nodeCount": len(workflow.get("nodes", []))},
+                )
+                data, _paths = self._refreshed_bundle()
+                self._send_json(
+                    {
+                        "ok": True,
+                        "message": f"协作编排 {workflow['name']} 已保存。",
+                        "workflow": workflow,
+                        "dashboard": data,
+                    }
+                )
+                return
+
+            if path == "/api/actions/orchestration/policy/save":
+                if not self._require_capability("taskWrite", "当前账号没有编辑动态路由策略的权限。"):
+                    return
+                policy = store_save_routing_policy(
+                    self.server.openclaw_dir,
+                    {
+                        "id": str(payload.get("id", "")).strip(),
+                        "name": str(payload.get("name", "")).strip(),
+                        "status": str(payload.get("status", "")).strip() or "active",
+                        "strategyType": str(payload.get("strategyType", "")).strip(),
+                        "keyword": str(payload.get("keyword", "")).strip(),
+                        "targetAgentId": str(payload.get("targetAgentId", "")).strip(),
+                        "priorityLevel": str(payload.get("priorityLevel", "")).strip() or "normal",
+                        "queueName": str(payload.get("queueName", "")).strip(),
+                    },
+                )
+                self._audit(
+                    "orchestration_policy_save",
+                    detail=f"保存动态路由策略 {policy['name']}",
+                    meta={"policyId": policy["id"], "strategyType": policy["strategyType"]},
+                )
+                data, _paths = self._refreshed_bundle()
+                self._send_json(
+                    {
+                        "ok": True,
+                        "message": f"动态路由策略 {policy['name']} 已保存。",
+                        "policy": policy,
+                        "dashboard": data,
+                    }
+                )
+                return
+
             if path == "/api/actions/conversations/send":
                 if not self._require_capability("conversationWrite", "当前账号没有发起或继续对话的权限。"):
                     return
@@ -8676,6 +10471,182 @@ class CollaborationDashboardHandler(BaseHTTPRequestHandler):
                         "dashboard": data,
                     }
                 )
+                return
+
+            if path == "/api/actions/context-hub/install":
+                if not self._require_capability("adminWrite", "只有 Owner 可以安装和维护 Context Hub CLI。"):
+                    return
+                result = perform_context_hub_install()
+                self._audit("context_hub_install", detail="安装 Context Hub CLI")
+                data, _paths = self._refreshed_bundle()
+                self._send_json({"ok": True, "message": "Context Hub CLI 已安装。", "result": result, "dashboard": data})
+                return
+
+            if path == "/api/actions/context-hub/update":
+                if not self._require_capability("adminWrite", "只有 Owner 可以刷新 Context Hub registry。"):
+                    return
+                result = perform_context_hub_update()
+                self._audit("context_hub_update", detail="刷新 Context Hub registry")
+                data, _paths = self._refreshed_bundle()
+                self._send_json({"ok": True, "message": "Context Hub registry 已刷新。", "result": result, "dashboard": data})
+                return
+
+            if path == "/api/actions/context-hub/search":
+                result = perform_context_hub_search(
+                    query=str(payload.get("query", "")).strip(),
+                    lang=str(payload.get("lang", "")).strip(),
+                    tags=str(payload.get("tags", "")).strip(),
+                    limit=int(payload.get("limit", 8) or 8),
+                )
+                self._audit("context_hub_search", detail="检索 Context Hub", meta={"query": str(payload.get("query", "")).strip()})
+                data, _paths = self._refreshed_bundle()
+                self._send_json({"ok": True, "message": "Context Hub 检索已完成。", "result": result, "dashboard": data})
+                return
+
+            if path == "/api/actions/context-hub/get":
+                result = perform_context_hub_get(
+                    entry_id=str(payload.get("id", "")).strip(),
+                    lang=str(payload.get("lang", "")).strip(),
+                    full=bool(payload.get("full")),
+                    files=str(payload.get("files", "")).strip(),
+                )
+                self._audit("context_hub_get", detail=f"获取 Context Hub 文档 {result.get('id', '')}", meta={"id": result.get("id", "")})
+                data, _paths = self._refreshed_bundle()
+                self._send_json({"ok": True, "message": "Context Hub 文档已获取。", "result": result, "dashboard": data})
+                return
+
+            if path == "/api/actions/context-hub/annotate":
+                if not self._require_capability("taskWrite", "只有 Operator / Owner 可以保存 Context Hub 注释。"):
+                    return
+                entry_id = str(payload.get("id", "")).strip()
+                clear = bool(payload.get("clear"))
+                result = perform_context_hub_annotate(
+                    entry_id=entry_id,
+                    note=str(payload.get("note", "")).strip(),
+                    clear=clear,
+                )
+                self._audit("context_hub_annotate", detail=f"{'清除' if clear else '保存'} Context Hub annotation", meta={"id": entry_id})
+                data, _paths = self._refreshed_bundle()
+                self._send_json({"ok": True, "message": "Context Hub annotation 已更新。", "result": result, "dashboard": data})
+                return
+
+            if path == "/api/actions/context-hub/feedback":
+                if not self._require_capability("adminWrite", "只有 Owner 可以发送 Context Hub feedback。"):
+                    return
+                labels = payload.get("labels", [])
+                if isinstance(labels, str):
+                    labels = [item.strip() for item in labels.split(",") if item.strip()]
+                result = perform_context_hub_feedback(
+                    entry_id=str(payload.get("id", "")).strip(),
+                    rating=str(payload.get("rating", "")).strip(),
+                    comment=str(payload.get("comment", "")).strip(),
+                    labels=labels if isinstance(labels, list) else [],
+                    lang=str(payload.get("lang", "")).strip(),
+                    file_path=str(payload.get("file", "")).strip(),
+                    agent=str(payload.get("agent", "")).strip(),
+                    model=str(payload.get("model", "")).strip(),
+                )
+                self._audit("context_hub_feedback", detail="发送 Context Hub feedback", meta={"id": str(payload.get("id", "")).strip(), "rating": str(payload.get("rating", "")).strip()})
+                data, _paths = self._refreshed_bundle()
+                self._send_json({"ok": True, "message": "Context Hub feedback 已发送。", "result": result, "dashboard": data})
+                return
+
+            if path == "/api/actions/openclaw/gateway/start":
+                if not self._require_capability("adminWrite", "只有 Owner 可以管理 Gateway 服务。"):
+                    return
+                result = perform_gateway_service_action(self.server.openclaw_dir, "start")
+                self._audit("openclaw_gateway_start", detail="启动 Gateway 服务")
+                data, _paths = self._refreshed_bundle()
+                self._send_json({"ok": True, "message": "Gateway 启动命令已执行。", "result": result, "dashboard": data})
+                return
+
+            if path == "/api/actions/openclaw/gateway/restart":
+                if not self._require_capability("adminWrite", "只有 Owner 可以管理 Gateway 服务。"):
+                    return
+                result = perform_gateway_service_action(self.server.openclaw_dir, "restart")
+                self._audit("openclaw_gateway_restart", detail="重启 Gateway 服务")
+                data, _paths = self._refreshed_bundle()
+                self._send_json({"ok": True, "message": "Gateway 重启命令已执行。", "result": result, "dashboard": data})
+                return
+
+            if path == "/api/actions/openclaw/browser/start":
+                if not self._require_capability("adminWrite", "只有 Owner 可以启动浏览器运行时。"):
+                    return
+                profile = str(payload.get("profile", "")).strip()
+                result = perform_browser_start(self.server.openclaw_dir, profile=profile)
+                self._audit("openclaw_browser_start", detail="启动 Browser 运行时", meta={"profile": profile})
+                data, _paths = self._refreshed_bundle()
+                self._send_json({"ok": True, "message": "Browser 启动命令已执行。", "result": result, "dashboard": data})
+                return
+
+            if path == "/api/actions/openclaw/browser/extension/install":
+                if not self._require_capability("adminWrite", "只有 Owner 可以安装浏览器扩展。"):
+                    return
+                result = perform_browser_extension_action(self.server.openclaw_dir, "install")
+                path_result = perform_browser_extension_action(self.server.openclaw_dir, "path")
+                self._audit("openclaw_browser_extension_install", detail="安装 Browser Extension")
+                data, _paths = self._refreshed_bundle()
+                self._send_json(
+                    {
+                        "ok": True,
+                        "message": "Browser Extension 已安装到本地稳定目录。",
+                        "result": {"install": result, "path": path_result},
+                        "dashboard": data,
+                    }
+                )
+                return
+
+            if path == "/api/actions/openclaw/browser/profile/create":
+                if not self._require_capability("adminWrite", "只有 Owner 可以创建浏览器 profile。"):
+                    return
+                result = perform_browser_create_profile(
+                    self.server.openclaw_dir,
+                    name=str(payload.get("name", "")).strip(),
+                    driver=str(payload.get("driver", "")).strip() or "openclaw",
+                    color=str(payload.get("color", "")).strip(),
+                    cdp_url=str(payload.get("cdpUrl", "")).strip(),
+                )
+                self._audit("openclaw_browser_profile_create", detail=f"创建 Browser Profile {result['name']}", meta={"profile": result["name"]})
+                data, _paths = self._refreshed_bundle()
+                self._send_json({"ok": True, "message": f"Browser profile {result['name']} 已创建。", "result": result, "dashboard": data})
+                return
+
+            if path == "/api/actions/openclaw/browser/open":
+                if not self._require_capability("adminWrite", "只有 Owner 可以控制本地浏览器工作台。"):
+                    return
+                profile = str(payload.get("profile", "")).strip()
+                result = perform_browser_open(self.server.openclaw_dir, url=str(payload.get("url", "")).strip(), profile=profile)
+                self._audit("openclaw_browser_open", detail="在 Browser 中打开页面", meta={"profile": profile, "url": result["url"]})
+                data, _paths = self._refreshed_bundle()
+                self._send_json({"ok": True, "message": f"已在 Browser 中打开 {result['url']}。", "result": result, "dashboard": data})
+                return
+
+            if path == "/api/actions/openclaw/browser/snapshot":
+                if not self._require_capability("adminWrite", "只有 Owner 可以抓取浏览器快照。"):
+                    return
+                result = perform_browser_snapshot(
+                    self.server.openclaw_dir,
+                    profile=str(payload.get("profile", "")).strip(),
+                    selector=str(payload.get("selector", "")).strip(),
+                    target_id=str(payload.get("targetId", "")).strip(),
+                    limit=int(payload.get("limit", 120) or 120),
+                )
+                self._audit("openclaw_browser_snapshot", detail="抓取 Browser Snapshot")
+                data, _paths = self._refreshed_bundle()
+                self._send_json({"ok": True, "message": "Browser snapshot 已返回。", "result": result, "dashboard": data})
+                return
+
+            if path == "/api/actions/openclaw/browser/plan":
+                if not self._require_capability("adminWrite", "只有 Owner 可以执行浏览器动作计划。"):
+                    return
+                result = perform_browser_plan(
+                    self.server.openclaw_dir,
+                    steps=payload.get("steps", []),
+                    profile=str(payload.get("profile", "")).strip(),
+                )
+                self._audit("openclaw_browser_plan", detail="执行 Browser 动作计划", meta={"steps": len(result.get("results", []))})
+                data, _paths = self._refreshed_bundle()
+                self._send_json({"ok": True, "message": f"Browser 动作计划已执行 {len(result.get('results', []))} 步。", "result": result, "dashboard": data})
                 return
 
             if path == "/api/actions/admin/user/create":
@@ -8781,6 +10752,111 @@ class CollaborationDashboardHandler(BaseHTTPRequestHandler):
                 )
                 return
 
+            if path == "/api/actions/admin/tenant/save":
+                if not self._require_capability("adminWrite", "只有 Owner 可以管理租户。"):
+                    return
+                name = str(payload.get("name", "")).strip()
+                if not name:
+                    raise RuntimeError("请先填写租户名称。")
+                tenant = store_save_tenant(
+                    self.server.openclaw_dir,
+                    {
+                        "id": str(payload.get("id", "")).strip(),
+                        "name": name,
+                        "slug": str(payload.get("slug", "")).strip(),
+                        "status": str(payload.get("status", "")).strip() or "active",
+                        "primaryOpenclawDir": str(payload.get("primaryOpenclawDir", "")).strip(),
+                        "meta": payload.get("meta") if isinstance(payload.get("meta"), dict) else {},
+                    },
+                )
+                self._audit(
+                    "tenant_save",
+                    detail=f"保存租户 {tenant['name']}",
+                    meta={"tenantId": tenant["id"], "slug": tenant.get("slug", "")},
+                )
+                data, _paths = self._refreshed_bundle()
+                self._send_json(
+                    {
+                        "ok": True,
+                        "message": f"租户 {tenant['name']} 已保存。",
+                        "tenant": tenant,
+                        "dashboard": data,
+                    }
+                )
+                return
+
+            if path == "/api/actions/admin/tenant/installation/save":
+                if not self._require_capability("adminWrite", "只有 Owner 可以绑定租户安装。"):
+                    return
+                tenant_id = str(payload.get("tenantId", "")).strip()
+                target_dir = str(payload.get("openclawDir", "")).strip()
+                if not tenant_id or not target_dir:
+                    raise RuntimeError("请先选择租户并填写 OpenClaw 目录。")
+                installation = register_installation(
+                    self.server.openclaw_dir,
+                    target_dir,
+                    label=str(payload.get("label", "")).strip(),
+                )
+                binding = store_save_tenant_installation(
+                    self.server.openclaw_dir,
+                    {
+                        "tenantId": tenant_id,
+                        "openclawDir": installation["openclawDir"],
+                        "label": str(payload.get("bindingLabel", "")).strip() or installation["label"],
+                        "role": str(payload.get("role", "")).strip() or "primary",
+                    },
+                )
+                tenant = find_tenant_record(self.server.openclaw_dir, tenant_id)
+                if tenant and (binding.get("role") == "primary" or not tenant.get("primaryOpenclawDir")):
+                    tenant = store_save_tenant(
+                        self.server.openclaw_dir,
+                        {
+                            **tenant,
+                            "primaryOpenclawDir": installation["openclawDir"],
+                        },
+                    )
+                self._audit(
+                    "tenant_installation_save",
+                    detail=f"绑定租户安装 {binding['label']}",
+                    meta={"tenantId": tenant_id, "openclawDir": binding["openclawDir"], "role": binding.get("role", "")},
+                )
+                data, _paths = self._refreshed_bundle()
+                self._send_json(
+                    {
+                        "ok": True,
+                        "message": f"租户安装 {binding['label']} 已绑定。",
+                        "tenant": tenant,
+                        "binding": binding,
+                        "dashboard": data,
+                    }
+                )
+                return
+
+            if path == "/api/actions/admin/tenant/api-key/create":
+                if not self._require_capability("adminWrite", "只有 Owner 可以创建租户 API Key。"):
+                    return
+                tenant_id = str(payload.get("tenantId", "")).strip()
+                name = str(payload.get("name", "")).strip()
+                scopes = payload.get("scopes") if isinstance(payload.get("scopes"), list) else []
+                if not tenant_id or not name:
+                    raise RuntimeError("请先选择租户并填写 API Key 名称。")
+                result = store_create_tenant_api_key(self.server.openclaw_dir, tenant_id, name, scopes=scopes or None)
+                self._audit(
+                    "tenant_api_key_create",
+                    detail=f"创建租户 API Key {name}",
+                    meta={"tenantId": tenant_id, "keyId": (result.get('key') or {}).get('id', '')},
+                )
+                data, _paths = self._refreshed_bundle()
+                self._send_json(
+                    {
+                        "ok": True,
+                        "message": f"租户 API Key {name} 已生成，请立即妥善保存。",
+                        "apiKey": result,
+                        "dashboard": data,
+                    }
+                )
+                return
+
             if path == "/api/actions/skills/scaffold":
                 if not self._require_capability("adminWrite", "只有 Owner 可以创建和维护技能目录。"):
                     return
@@ -8871,6 +10947,9 @@ class CollaborationDashboardHandler(BaseHTTPRequestHandler):
         path = self._path()
         if self._serve_frontend_asset(path):
             return
+        if path.startswith("/api/v1/"):
+            if self._handle_rest_get(path):
+                return
         if path == "/legacy-login":
             if self._is_authenticated():
                 self._send_redirect("/")
@@ -8940,6 +11019,11 @@ class CollaborationDashboardHandler(BaseHTTPRequestHandler):
             body = (json.dumps({"skills": data.get("skills", {})}, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
             self._send_bytes(body, "application/json; charset=utf-8")
             return
+        if path == "/api/context":
+            data, _paths = self._bundle()
+            body = (json.dumps({"contextHub": data.get("contextHub", {})}, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+            self._send_bytes(body, "application/json; charset=utf-8")
+            return
         if path == "/api/openclaw":
             data, _paths = self._bundle()
             body = (json.dumps({"openclaw": data.get("openclaw", {})}, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
@@ -8965,6 +11049,9 @@ class CollaborationDashboardHandler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         path = self._path()
+        if path.startswith("/api/v1/"):
+            if self._handle_rest_post(path):
+                return
         if path == "/login":
             self._handle_login_post()
             return

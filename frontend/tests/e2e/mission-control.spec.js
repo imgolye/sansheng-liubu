@@ -33,6 +33,8 @@ test("english locale applies across delivery and conversation workspaces", async
   await expect(page.getByText("Conversation list")).toBeVisible();
   await expect(page.getByText("Live transcript")).toBeVisible();
   await expect(page.getByRole("button", { name: "Send message" })).toBeVisible();
+  await page.getByText(/Taizi|太子/).first().click();
+  await expect(page.getByText(/今天还有哪些任务未收口？|What tasks are still open today\?/)).toBeVisible();
 });
 
 test("mobile delivery workspace defaults to cards", async ({ browser }) => {
@@ -52,4 +54,23 @@ test("mobile delivery workspace defaults to cards", async ({ browser }) => {
 test("pwa shell is linked from the login page", async ({ page }) => {
   await page.goto("/login");
   await expect(page.locator('link[rel="manifest"]')).toHaveAttribute("href", "/manifest.webmanifest");
+});
+
+test("openclaw workspace shows rpc and browser upgrade surfaces", async ({ page }) => {
+  await login(page);
+  await page.goto("/openclaw");
+  await expect(page.getByRole("heading", { name: /^OpenClaw$/ })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /Gateway RPC ready|Gateway RPC 关注|Gateway RPC attention/i })).toBeVisible();
+  await expect(page.getByText(/Browser Attach|Browser attach/).first()).toBeVisible();
+  await expect(page.getByText(/^user$/).first()).toBeVisible();
+  await expect(page.getByText(/Skills governance and warnings|Skills 治理与告警/).first()).toBeVisible();
+});
+
+test("context center exposes doc search and annotation surfaces", async ({ page }) => {
+  await login(page);
+  await page.goto("/context");
+  await expect(page.getByRole("heading", { name: /Context Center/ })).toBeVisible();
+  await expect(page.getByText(/检索文档|Search docs/).first()).toBeVisible();
+  await expect(page.getByText(/Annotation Center/).first()).toBeVisible();
+  await expect(page.getByText(/Feedback Center/).first()).toBeVisible();
 });

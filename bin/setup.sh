@@ -6,7 +6,7 @@ set -euo pipefail
 #  用法: bash setup.sh [--theme imperial|corporate|startup]
 # ============================================================
 
-VERSION="1.17.0"
+VERSION="1.18.0"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 TEMPLATES_DIR="$PROJECT_DIR/templates"

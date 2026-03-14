@@ -1,4 +1,4 @@
-import { lazy, startTransition, Suspense, useDeferredValue, useEffect, useState } from "react";
+import { lazy, startTransition, Suspense, useDeferredValue, useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import {
   App as AntdApp,
@@ -11,8 +11,8 @@ import {
   Layout,
   Menu,
   Segmented,
+  Skeleton,
   Space,
-  Spin,
   Tag,
   Typography,
 } from "antd";
@@ -21,6 +21,7 @@ import zhCN from "antd/locale/zh_CN";
 import {
   ApiOutlined,
   ApartmentOutlined,
+  BookOutlined,
   CommentOutlined,
   DashboardOutlined,
   DeploymentUnitOutlined,
@@ -34,6 +35,7 @@ import {
 import { ApiError, getConversationTranscript, getDashboard, getSession, loginWithPassword, loginWithToken, logout, postAction } from "./api";
 import { safeArray } from "./ui.jsx";
 import { buildTranslator, normalizeLocale } from "./i18n.jsx";
+import ViewErrorBoundary from "./components/ViewErrorBoundary.jsx";
 
 const { Header, Sider, Content } = Layout;
 const { Title, Paragraph, Text } = Typography;
@@ -42,6 +44,8 @@ const { Title, Paragraph, Text } = Typography;
 const LoginPage = lazy(() => import("./LoginPage"));
 const OverviewView = lazy(() => import("./views/OverviewView"));
 const ManagementView = lazy(() => import("./views/ManagementView"));
+const OrchestrationView = lazy(() => import("./views/OrchestrationView"));
+const ContextHubView = lazy(() => import("./views/ContextHubView"));
 const AgentsView = lazy(() => import("./views/AgentsView"));
 const TasksView = lazy(() => import("./views/TasksView"));
 const ConversationsView = lazy(() => import("./views/ConversationsView"));
@@ -55,6 +59,19 @@ const TaskDrawer = lazy(() => import("./components/TaskDrawer"));
 const CreateTaskModal = lazy(() => import("./components/CreateTaskModal"));
 
 const LOCALE_STORAGE_KEY = "mission-control.locale";
+const POLL_INTERVAL_MS = 8000;
+
+function ViewSkeleton({ compact = false }) {
+  return (
+    <Card className="workspace-card">
+      <Space direction="vertical" size={18} style={{ width: "100%" }}>
+        <Skeleton.Button active block style={{ width: compact ? "48%" : "28%", height: 18 }} />
+        <Skeleton.Input active block style={{ height: compact ? 36 : 44 }} />
+        <Skeleton active paragraph={{ rows: compact ? 3 : 6 }} title={false} />
+      </Space>
+    </Card>
+  );
+}
 
 function normalizePath(pathname) {
   if (!pathname || pathname === "/") {
@@ -67,6 +84,8 @@ function menuItems(t) {
   return [
     { key: "/overview", icon: <DashboardOutlined />, label: t("menu.overview") },
     { key: "/management", icon: <DeploymentUnitOutlined />, label: t("menu.management") },
+    { key: "/orchestration", icon: <ApartmentOutlined />, label: t("menu.orchestration") },
+    { key: "/context", icon: <BookOutlined />, label: t("menu.context") },
     { key: "/agents", icon: <TeamOutlined />, label: t("menu.agents") },
     { key: "/tasks", icon: <UnorderedListOutlined />, label: t("menu.tasks") },
     { key: "/conversations", icon: <CommentOutlined />, label: t("menu.conversations") },
@@ -102,6 +121,7 @@ function App() {
     }
   });
   const [isOffline, setIsOffline] = useState(() => !navigator.onLine);
+  const dashboardRefreshRef = useRef(() => Promise.resolve());
   const currentPath = normalizePath(location.pathname);
   const deferredSearch = useDeferredValue(search);
   const localeKey = localePreference === "auto" ? normalizeLocale(dashboard?.theme?.language) : normalizeLocale(localePreference);
@@ -132,6 +152,10 @@ function App() {
       }
     }
   }
+
+  useEffect(() => {
+    dashboardRefreshRef.current = refreshDashboard;
+  });
 
   async function bootstrap() {
     setBooting(true);
@@ -174,10 +198,76 @@ function App() {
     if (!session) {
       return undefined;
     }
-    const timer = window.setInterval(() => {
-      void refreshDashboard({ silent: true });
-    }, 8000);
-    return () => window.clearInterval(timer);
+
+    let pollTimer = 0;
+    let reconnectTimer = 0;
+    let eventSource = null;
+    let disposed = false;
+
+    const stopPolling = () => {
+      if (pollTimer) {
+        window.clearInterval(pollTimer);
+        pollTimer = 0;
+      }
+    };
+
+    const startPolling = () => {
+      if (pollTimer) {
+        return;
+      }
+      pollTimer = window.setInterval(() => {
+        void dashboardRefreshRef.current({ silent: true });
+      }, POLL_INTERVAL_MS);
+    };
+
+    const closeStream = () => {
+      if (eventSource) {
+        eventSource.close();
+        eventSource = null;
+      }
+    };
+
+    const connectStream = () => {
+      if (disposed || !window.EventSource) {
+        startPolling();
+        return;
+      }
+
+      closeStream();
+      eventSource = new window.EventSource("/events", { withCredentials: true });
+      eventSource.addEventListener("dashboard", () => {
+        void dashboardRefreshRef.current({ silent: true });
+      });
+      eventSource.onopen = () => {
+        if (reconnectTimer) {
+          window.clearTimeout(reconnectTimer);
+          reconnectTimer = 0;
+        }
+        stopPolling();
+      };
+      eventSource.onerror = () => {
+        closeStream();
+        startPolling();
+        if (!disposed && navigator.onLine) {
+          if (reconnectTimer) {
+            window.clearTimeout(reconnectTimer);
+          }
+          reconnectTimer = window.setTimeout(connectStream, 4000);
+        }
+      };
+    };
+
+    connectStream();
+    startPolling();
+
+    return () => {
+      disposed = true;
+      stopPolling();
+      closeStream();
+      if (reconnectTimer) {
+        window.clearTimeout(reconnectTimer);
+      }
+    };
   }, [session]);
 
   useEffect(() => {
@@ -195,6 +285,7 @@ function App() {
   useEffect(() => {
     function handleOnline() {
       setIsOffline(false);
+      void dashboardRefreshRef.current({ silent: true });
     }
     function handleOffline() {
       setIsOffline(true);
@@ -309,17 +400,32 @@ function App() {
     const viewProps = { dashboard, agents, tasks, permissions, sessions, t, localeKey };
     switch (currentPath) {
       case "/agents":
-        return <AgentsView {...viewProps} onSelectAgent={setSelectedAgentId} />;
+        return <AgentsView {...viewProps} onSelectAgent={setSelectedAgentId} onNavigate={(path) => navigate(path)} />;
       case "/management":
         return (
           <ManagementView
             {...viewProps}
             onCreateRun={(values) => runAction("/api/actions/management/run/create", values)}
             onUpdateRun={(values) => runAction("/api/actions/management/run/update", values)}
+            onSaveRule={(values) => runAction("/api/actions/management/rule/save", values)}
+            onSaveChannel={(values) => runAction("/api/actions/management/channel/save", values)}
+            onTestChannel={(values) => runAction("/api/actions/management/channel/test", values)}
+            onBootstrapRules={() => runAction("/api/actions/management/bootstrap", {})}
+            onExportReport={() => runAction("/api/actions/management/report/export", {})}
             onSelectTask={setSelectedTaskId}
             onOpenConversation={openConversation}
           />
         );
+      case "/orchestration":
+        return (
+          <OrchestrationView
+            {...viewProps}
+            onSaveWorkflow={(values) => runAction("/api/actions/orchestration/workflow/save", values)}
+            onSavePolicy={(values) => runAction("/api/actions/orchestration/policy/save", values)}
+          />
+        );
+      case "/context":
+        return <ContextHubView {...viewProps} onAction={runAction} />;
       case "/tasks":
         return <TasksView {...viewProps} onOpenCreateTask={() => setCreateTaskOpen(true)} onSelectTask={setSelectedTaskId} />;
       case "/conversations":
@@ -357,32 +463,37 @@ function App() {
           />
         );
       case "/openclaw":
-        return <OpenClawView {...viewProps} />;
+        return <OpenClawView {...viewProps} onAction={runAction} />;
       case "/admin":
         return (
           <AdminView
             {...viewProps}
             onRegisterInstance={(values) => runAction("/api/actions/admin/instance/register", values)}
             onCreateUser={(values) => runAction("/api/actions/admin/user/create", values)}
+            onCreateTenant={(values) => runAction("/api/actions/admin/tenant/save", values)}
+            onBindTenantInstallation={(values) => runAction("/api/actions/admin/tenant/installation/save", values)}
+            onCreateTenantApiKey={(values) => runAction("/api/actions/admin/tenant/api-key/create", values)}
           />
         );
       case "/overview":
       default:
-        return <OverviewView {...viewProps} />;
+        return <OverviewView {...viewProps} onNavigate={(path) => navigate(path)} onOpenCreateTask={() => setCreateTaskOpen(true)} />;
     }
   }
 
   if (booting) {
     return (
       <div className="center-screen">
-        <Spin size="large" />
+        <div className="shell-boot-card">
+          <ViewSkeleton />
+        </div>
       </div>
     );
   }
 
   if (!session) {
     return (
-      <Suspense fallback={<div className="center-screen"><Spin size="large" /></div>}>
+      <Suspense fallback={<div className="center-screen"><div className="shell-boot-card"><ViewSkeleton compact /></div></div>}>
         <LoginPage
           t={t}
           authMode={authMode}
@@ -486,13 +597,19 @@ function App() {
               <Alert type="info" banner showIcon={false} message={t("app.staleBanner")} style={{ marginBottom: 16 }} />
             ) : null}
             {!dashboard ? (
-              <Card>
-                <Spin />
-              </Card>
+              <ViewSkeleton />
             ) : (
-              <Suspense fallback={<Card><Spin /></Card>}>
-                {renderCurrentView()}
-              </Suspense>
+              <ViewErrorBoundary
+                resetKey={`${currentPath}:${dashboard?.signature || ""}`}
+                title={t("app.moduleErrorTitle")}
+                description={t("app.moduleErrorDescription")}
+                retryLabel={t("app.moduleErrorRetry")}
+                onError={() => message.error(t("app.moduleErrorToast"))}
+              >
+                <Suspense fallback={<ViewSkeleton />}>
+                  {renderCurrentView()}
+                </Suspense>
+              </ViewErrorBoundary>
             )}
           </Content>
         </Layout>

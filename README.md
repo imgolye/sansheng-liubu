@@ -4,7 +4,7 @@
 
 一键部署 11 个协作 AI Agent，模拟组织架构处理复杂任务。
 
-## 1.17.0 亮点
+## 1.18.0 亮点
 
 现在不只是一个“本地操作台”，而是更接近可交付的本地商业产品：
 
@@ -13,6 +13,12 @@ python3 ~/.openclaw/workspace-your-router-id/scripts/collaboration_dashboard.py 
 ```
 
 这一版新增：
+- 多租户 / SaaS 后台：`/admin` 现在支持租户创建、安装绑定、租户 API Key 签发和租户维度运营总览
+- 开放平台 REST API：新增 `/api/v1/tenants/:tenantId/dashboard|tasks|agents|management`，外部系统可用 API Key 直接读取或触发任务
+- 端到端运营闭环：管理台支持自动化规则、通知渠道、Agent 健康度和运营周报导出，不再只是看板
+- Agent 编排 IDE：新增 `/orchestration`，支持可视化编排、动态路由策略、协作回放和上下文丢失热点
+- Docker 交付模式：新增 `Dockerfile`、`docker-compose.yml` 和 `bin/docker_bootstrap.sh`，可把前后端与 OpenClaw 打成可分发运行单元
+- PostgreSQL 升级路径：新增 `bin/export_dashboard_postgres.py`，可把 SQLite 控制平面数据导出成 PostgreSQL-friendly schema + CSV bundle
 - 高频工作区双语：`Tasks`、`Conversations`、`Themes`、`Skills`、`OpenClaw` 已支持中英切换，并跟随主题语言偏好
 - 移动端交付台：`Tasks` 在窄屏下会自动切到卡片工作台，手机上也能直接看任务和打开详情
 - PWA 产品壳：新增 `manifest`、`service worker` 和可安装元数据，本地产品可以作为桌面/移动 Web App 使用
@@ -96,6 +102,24 @@ bash bin/validate.sh   # 验证安装
 
 ```bash
 bash bin/setup.sh --theme corporate
+```
+
+## Docker 部署
+
+```bash
+docker compose up -d
+```
+
+可选启用 PostgreSQL：
+
+```bash
+docker compose --profile postgres up -d
+```
+
+如果要把现有本地控制平面数据导出给 PostgreSQL，执行：
+
+```bash
+python3 bin/export_dashboard_postgres.py --dir ~/.openclaw --output ./dist/postgres-export
 ```
 
 ## 5 分钟上手

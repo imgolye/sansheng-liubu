@@ -1,15 +1,23 @@
-import { Card, Col, Progress, Row, Segmented, Space, Table, Typography } from "antd";
-import { useMemo, useState } from "react";
+import { Card, Col, Grid, Progress, Row, Segmented, Space, Table, Typography } from "antd";
+import { useEffect, useMemo, useState } from "react";
+import NextStepCard from "../components/NextStepCard.jsx";
 import { statusTag } from "../ui.jsx";
 
 const { Text, Paragraph } = Typography;
+const { useBreakpoint } = Grid;
 
 function loadScore(agent) {
   return Math.min(100, agent.activeTasks * 25 + agent.blockedTasks * 18 + agent.handoffs24h * 2);
 }
 
-function AgentsView({ agents, onSelectAgent, t }) {
-  const [mode, setMode] = useState("table");
+function AgentsView({ agents, onSelectAgent, onNavigate, t }) {
+  const screens = useBreakpoint();
+  const isCompact = !screens.lg;
+  const [mode, setMode] = useState(isCompact ? "cards" : "table");
+
+  useEffect(() => {
+    setMode(isCompact ? "cards" : "table");
+  }, [isCompact]);
   const columns = useMemo(
     () => [
       { title: t("overview.columns.agent"), dataIndex: "title", width: 180 },
@@ -23,6 +31,19 @@ function AgentsView({ agents, onSelectAgent, t }) {
     ],
     [t],
   );
+
+  if (!agents.length) {
+    return (
+      <NextStepCard
+        title={t("guides.agents.title")}
+        description={t("guides.agents.description")}
+        steps={[t("guides.agents.step1"), t("guides.agents.step2"), t("guides.agents.step3")]}
+        actionLabel={t("guides.agents.action")}
+        onAction={() => onNavigate?.("/themes")}
+        iconText="A"
+      />
+    );
+  }
 
   return (
     <Card

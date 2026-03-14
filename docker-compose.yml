@@ -1,0 +1,36 @@
+services:
+  mission-control:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: sansheng-liubu:local
+    container_name: sansheng-liubu
+    restart: unless-stopped
+    environment:
+      OPENCLAW_DIR: /data/openclaw
+      PORT: 18890
+      BOOTSTRAP_THEME: ${BOOTSTRAP_THEME:-imperial}
+    ports:
+      - "${MISSION_CONTROL_PORT:-18890}:18890"
+    volumes:
+      - mission_control_state:/data/openclaw
+    profiles:
+      - default
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-sansheng_liubu}
+      POSTGRES_USER: ${POSTGRES_USER:-sansheng}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-sansheng}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    profiles:
+      - postgres
+
+volumes:
+  mission_control_state:
+  postgres_data:

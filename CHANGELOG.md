@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.18.0 - 2026-03-14
+
+### Added
+- Added a multi-tenant SaaS control plane to Mission Control, including tenant records, tenant-to-installation bindings, tenant API keys, and tenant-level admin summaries.
+- Added tenant-scoped REST API endpoints under `/api/v1/tenants/...` so external CI/CD or webhook systems can read dashboards, list agents/tasks, and create tasks with API-key authentication.
+- Added a commercial Admin workspace extension for tenant creation, installation binding, API-key issuance, and SaaS readiness guidance.
+- Added Docker delivery artifacts (`Dockerfile`, `docker-compose.yml`, `bin/docker_bootstrap.sh`) for one-command remote deployment of Mission Control plus OpenClaw runtime bootstrap.
+- Added `bin/export_dashboard_postgres.py` to export the SQLite product kernel into PostgreSQL-friendly schema and CSV bundles for larger-scale persistence.
+
+### Changed
+- Expanded Mission Control from a powerful local operator console into a tenant-aware product foundation that can be handed to other teams.
+- Reworked tenant summaries to use lightweight task/agent aggregation so multi-tenant admin views stay stable without recursively rebuilding nested dashboards.
+- Updated product/runtime version metadata to `1.18.0`.
+
 ## 1.17.0 - 2026-03-14
 
 ### Added

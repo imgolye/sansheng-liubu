@@ -187,6 +187,119 @@ class DashboardStoreTests(unittest.TestCase):
             self.assertEqual(completed["status"], "complete")
             self.assertTrue(completed["completedAt"])
 
+    def test_automation_rules_channels_and_alerts_roundtrip(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            openclaw_dir = Path(tmpdir)
+
+            channel = dashboard_store.save_notification_channel(
+                openclaw_dir,
+                {
+                    "name": "Ops Feishu",
+                    "type": "feishu",
+                    "target": "fixture://feishu/ops-room",
+                },
+            )
+            rule = dashboard_store.save_automation_rule(
+                openclaw_dir,
+                {
+                    "name": "关键任务完成通知",
+                    "triggerType": "critical_task_done",
+                    "severity": "critical",
+                    "matchText": "S级",
+                    "channelIds": [channel["id"]],
+                },
+            )
+            alert = dashboard_store.upsert_automation_alert(
+                openclaw_dir,
+                {
+                    "ruleId": rule["id"],
+                    "eventKey": "TASK-001",
+                    "title": "关键任务 TASK-001 已完成",
+                    "detail": "请同步到值班群。",
+                    "severity": "critical",
+                    "sourceType": "task",
+                    "sourceId": "TASK-001",
+                },
+            )
+            delivery = dashboard_store.save_notification_delivery(
+                openclaw_dir,
+                alert["id"],
+                channel["id"],
+                "success",
+                detail="fixture delivered",
+            )
+
+            self.assertEqual(dashboard_store.list_automation_rules(openclaw_dir)[0]["channelIds"], [channel["id"]])
+            self.assertEqual(dashboard_store.list_notification_channels(openclaw_dir)[0]["name"], "Ops Feishu")
+            self.assertEqual(dashboard_store.list_automation_alerts(openclaw_dir)[0]["eventKey"], "TASK-001")
+            self.assertEqual(dashboard_store.list_notification_deliveries(openclaw_dir)[0]["channelId"], channel["id"])
+            self.assertEqual(delivery["outcome"], "success")
+
+    def test_orchestration_workflow_and_routing_policy_roundtrip(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            openclaw_dir = Path(tmpdir)
+
+            workflow = dashboard_store.save_orchestration_workflow(
+                openclaw_dir,
+                {
+                    "name": "Engineering to QA",
+                    "description": "A starter orchestration flow",
+                    "lanes": [{"id": "build", "title": "Engineering"}, {"id": "qa", "title": "Quality"}],
+                    "nodes": [{"id": "node-build", "laneId": "build", "title": "Engineering", "agentId": "gongbu"}],
+                },
+            )
+            policy = dashboard_store.save_routing_policy(
+                openclaw_dir,
+                {
+                    "name": "Bugfix to Gongbu",
+                    "strategyType": "keyword_department",
+                    "keyword": "bugfix",
+                    "targetAgentId": "gongbu",
+                    "priorityLevel": "high",
+                    "queueName": "release-fast-lane",
+                },
+            )
+
+            self.assertEqual(dashboard_store.list_orchestration_workflows(openclaw_dir)[0]["name"], "Engineering to QA")
+            self.assertEqual(dashboard_store.list_orchestration_workflows(openclaw_dir)[0]["nodes"][0]["agentId"], "gongbu")
+            self.assertEqual(dashboard_store.list_routing_policies(openclaw_dir)[0]["targetAgentId"], "gongbu")
+            self.assertEqual(workflow["status"], "active")
+            self.assertEqual(policy["priorityLevel"], "high")
+
+    def test_tenant_registry_and_api_key_roundtrip(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            openclaw_dir = Path(tmpdir)
+
+            tenant = dashboard_store.save_tenant(
+                openclaw_dir,
+                {
+                    "name": "Team North",
+                    "slug": "team-north",
+                    "primaryOpenclawDir": "/srv/openclaw/team-north",
+                },
+            )
+            binding = dashboard_store.save_tenant_installation(
+                openclaw_dir,
+                {
+                    "tenantId": tenant["id"],
+                    "openclawDir": "/srv/openclaw/team-north",
+                    "label": "Team North Prod",
+                    "role": "primary",
+                },
+            )
+            created = dashboard_store.create_tenant_api_key(
+                openclaw_dir,
+                tenant["id"],
+                "ci-deploy",
+                scopes=["tenant:read", "tasks:write"],
+            )
+            resolved = dashboard_store.resolve_tenant_api_key(openclaw_dir, created["rawKey"])
+
+            self.assertEqual(dashboard_store.list_tenants(openclaw_dir)[0]["slug"], "team-north")
+            self.assertEqual(dashboard_store.list_tenant_installations(openclaw_dir, tenant["id"])[0]["label"], binding["label"])
+            self.assertEqual(resolved["tenantId"], tenant["id"])
+            self.assertIn("tasks:write", resolved["scopes"])
+
 
 if __name__ == "__main__":
     unittest.main()

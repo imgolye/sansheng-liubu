@@ -129,6 +129,91 @@ def main():
         print(json.dumps(payload, ensure_ascii=False))
         return 0
 
+    if args[:4] == ["gateway", "status", "--require-rpc", "--json"]:
+        payload = {
+            "service": {
+                "runtime": {"status": "running"},
+            },
+            "gateway": {
+                "bindMode": "loopback",
+                "port": 18789,
+                "probeUrl": "ws://127.0.0.1:18789",
+            },
+            "rpc": {
+                "ok": True,
+                "url": "ws://127.0.0.1:18789",
+                "error": "",
+            },
+        }
+        print(json.dumps(payload, ensure_ascii=False))
+        return 0
+
+    if args[:2] == ["gateway", "start"]:
+        print("gateway started")
+        return 0
+
+    if args[:2] == ["gateway", "restart"]:
+        print("gateway restarted")
+        return 0
+
+    if args[:3] == ["browser", "status", "--json"]:
+        payload = {
+            "ok": True,
+            "running": True,
+            "profile": "user",
+            "targets": 2,
+            "error": "",
+        }
+        print(json.dumps(payload, ensure_ascii=False))
+        return 0
+
+    if args[:3] == ["browser", "profiles", "--json"]:
+        payload = {
+            "profiles": [
+                {"name": "user", "running": True, "description": "Logged-in host browser"},
+                {"name": "chrome-relay", "running": False, "description": "Chrome relay bridge"},
+            ]
+        }
+        print(json.dumps(payload, ensure_ascii=False))
+        return 0
+
+    if args[:2] == ["browser", "start"]:
+        print("browser started")
+        return 0
+
+    if args[:3] == ["browser", "extension", "install"]:
+        print("/tmp/openclaw-browser-extension")
+        return 0
+
+    if args[:3] == ["browser", "extension", "path"]:
+        print("/tmp/openclaw-browser-extension")
+        return 0
+
+    if args[:2] == ["browser", "create-profile"]:
+        profile_name = args[args.index("--name") + 1] if "--name" in args else "user"
+        print(f"profile created: {profile_name}")
+        return 0
+
+    if args[:2] == ["browser", "open"]:
+        print(f"opened: {args[2]}")
+        return 0
+
+    if args[:2] == ["browser", "snapshot"]:
+        print("Snapshot\\n[1] button \\"Continue\\"")
+        return 0
+
+    if args[:2] == ["browser", "click"]:
+        print(f"clicked: {args[2]}")
+        return 0
+
+    if args[:2] == ["browser", "wait"]:
+        print("wait complete")
+        return 0
+
+    if args[:2] == ["browser", "fill"]:
+        print("fill complete")
+        return 0
+
     if args[:3] == ["skills", "list", "--json"]:
         payload = {
             "managedSkillsDir": str(Path(state_dir) / "skills"),
@@ -140,6 +225,20 @@ def main():
                     "bundled": False,
                     "source": "managed",
                     "description": "Fixture skill",
+                }
+            ],
+        }
+        print(json.dumps(payload, ensure_ascii=False))
+        return 0
+
+    if args[:3] == ["skills", "check", "--json"]:
+        payload = {
+            "summary": {"total": 1, "eligible": 1, "disabled": 0, "blocked": 0, "missingRequirements": 1},
+            "missingRequirements": [
+                {
+                    "name": "demo-missing-skill",
+                    "missing": {"bins": ["demo-cli"], "env": ["DEMO_TOKEN"], "config": [], "anyBins": [], "os": []},
+                    "install": [{"label": "Install demo-cli"}],
                 }
             ],
         }
@@ -191,6 +290,95 @@ if __name__ == "__main__":
 """
 
 
+def _fake_chub_cli():
+    return """#!/usr/bin/env python3
+import json
+import os
+import sys
+from pathlib import Path
+
+
+def chub_home():
+    state_dir = Path(os.environ.get("OPENCLAW_STATE_DIR", "."))
+    home = state_dir / ".fixture-chub"
+    home.mkdir(parents=True, exist_ok=True)
+    return home
+
+
+def annotations_path():
+    return chub_home() / "annotations.json"
+
+
+def load_annotations():
+    path = annotations_path()
+    if not path.exists():
+        return []
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def save_annotations(items):
+    annotations_path().write_text(json.dumps(items, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def main():
+    args = sys.argv[1:]
+    if not args:
+        print("chub — Context Hub CLI v0.1.2")
+        return 0
+
+    if args == ["help"]:
+        print("chub — Context Hub CLI v0.1.2")
+        return 0
+
+    if args[:3] == ["cache", "status", "--json"]:
+        print(json.dumps({"exists": True, "sources": [{"name": "default", "type": "remote", "hasRegistry": True, "lastUpdated": "2026-03-14T09:00:00Z", "fullBundle": False, "fileCount": 42, "dataSize": 2048}]}, ensure_ascii=False))
+        return 0
+
+    if args[:2] == ["update", "--json"] or args[:1] == ["update"]:
+        print(json.dumps({"status": "ok", "mode": "registry", "updated": 1, "errors": []}, ensure_ascii=False))
+        return 0
+
+    if len(args) >= 2 and args[0] == "search":
+        query = args[1]
+        print(json.dumps({"results": [{"id": "openai/chat", "name": "chat", "description": f"Result for {query}", "source": "maintainer", "languages": [{"language": "python", "recommendedVersion": "2.24.0"}]}]}, ensure_ascii=False))
+        return 0
+
+    if len(args) >= 2 and args[0] == "get":
+        entry_id = args[1]
+        print(json.dumps({"id": entry_id, "type": "doc", "language": "python", "version": "2.24.0", "content": f"# {entry_id}\\n\\nFixture content for Mission Control.", "additionalFiles": ["references/errors.md"]}, ensure_ascii=False))
+        return 0
+
+    if args[:2] == ["annotate", "--list"]:
+        print(json.dumps(load_annotations(), ensure_ascii=False))
+        return 0
+
+    if args and args[0] == "annotate":
+        entry_id = args[1]
+        items = [item for item in load_annotations() if item.get("id") != entry_id]
+        if "--clear" in args:
+            save_annotations(items)
+            print(json.dumps({"id": entry_id, "cleared": True}, ensure_ascii=False))
+            return 0
+        note = args[2]
+        record = {"id": entry_id, "note": note, "updatedAt": "2026-03-14T09:40:00.000Z"}
+        items.append(record)
+        save_annotations(items)
+        print(json.dumps(record, ensure_ascii=False))
+        return 0
+
+    if args and args[0] == "feedback":
+        print(json.dumps({"status": "ok", "id": args[1], "rating": args[2]}, ensure_ascii=False))
+        return 0
+
+    print(json.dumps({"error": "unsupported", "args": args}, ensure_ascii=False), file=sys.stderr)
+    return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+"""
+
+
 def create_fixture_openclaw_dir(base_dir):
     openclaw_dir = Path(base_dir)
     openclaw_dir.mkdir(parents=True, exist_ok=True)
@@ -201,7 +389,7 @@ def create_fixture_openclaw_dir(base_dir):
         {
             "agents": {
                 "list": [
-                    {"id": "taizi", "default": True, "workspace": str(openclaw_dir / "workspace-taizi")},
+                    {"id": "taizi", "default": True, "workspace": str(openclaw_dir / "workspace-taizi"), "params": {"profile": "user", "tier": "primary"}},
                     {"id": "zhongshu", "workspace": str(openclaw_dir / "workspace-zhongshu")},
                 ]
             }
@@ -275,6 +463,9 @@ def create_fixture_openclaw_dir(base_dir):
     cli_path = bin_dir / "openclaw"
     cli_path.write_text(_fake_openclaw_cli(), encoding="utf-8")
     cli_path.chmod(cli_path.stat().st_mode | stat.S_IEXEC)
+    chub_path = bin_dir / "chub"
+    chub_path.write_text(_fake_chub_cli(), encoding="utf-8")
+    chub_path.chmod(chub_path.stat().st_mode | stat.S_IEXEC)
     return openclaw_dir
 
 

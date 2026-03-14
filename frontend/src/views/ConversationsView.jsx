@@ -63,11 +63,15 @@ function ConversationsView({
                   dataSource={safeArray(transcript.items)}
                   locale={{ emptyText: t("conversations.emptyTranscript") }}
                   renderItem={(item) => (
-                    <List.Item>
-                      <List.Item.Meta
-                        title={formatListText([item.title, item.at])}
-                        description={<div className="transcript-bubble">{item.text || t("conversations.noText")}</div>}
-                      />
+                    <List.Item className={`transcript-row transcript-row-${item.kind || "system"}`}>
+                      <div className="transcript-bubble-wrap">
+                        <div className="transcript-bubble-meta">
+                          <Text type="secondary">{formatListText([item.title, item.at])}</Text>
+                        </div>
+                        <div className={`transcript-bubble transcript-bubble-${item.kind || "system"}${item.error ? " transcript-bubble-error" : ""}`}>
+                          {item.text || t("conversations.noText")}
+                        </div>
+                      </div>
                     </List.Item>
                   )}
                 />

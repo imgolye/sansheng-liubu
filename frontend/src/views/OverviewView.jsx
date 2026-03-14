@@ -1,5 +1,6 @@
 import { Card, Col, List, Row, Statistic, Table, Timeline, Typography } from "antd";
 import { metricCards, safeArray, statusTag } from "../ui.jsx";
+import NextStepCard from "../components/NextStepCard.jsx";
 import {
   ActivityTrendPanel,
   AgentLoadPanel,
@@ -11,12 +12,13 @@ import {
 
 const { Title, Paragraph, Text } = Typography;
 
-function OverviewView({ dashboard, agents, tasks, t }) {
+function OverviewView({ dashboard, agents, tasks, sessions, onNavigate, onOpenCreateTask, t }) {
   const topMetrics = metricCards(dashboard.metrics).slice(0, 3);
   const flowMetrics = metricCards(dashboard.metrics).slice(3);
   const funnelData = buildTaskFunnel(tasks);
   const loadData = buildAgentLoadData(agents);
   const trendData = buildActivityTrend(safeArray(dashboard.events));
+  const hasEmptyGuides = !agents.length || !tasks.length || !sessions.length;
 
   return (
     <div className="overview-shell">
@@ -54,6 +56,47 @@ function OverviewView({ dashboard, agents, tasks, t }) {
           </Col>
         ))}
       </Row>
+
+      {hasEmptyGuides ? (
+        <Row gutter={[16, 16]}>
+          {!tasks.length ? (
+            <Col xs={24} xl={8}>
+              <NextStepCard
+                title={t("guides.tasks.title")}
+                description={t("guides.tasks.description")}
+                steps={[t("guides.tasks.step1"), t("guides.tasks.step2"), t("guides.tasks.step3")]}
+                actionLabel={onOpenCreateTask ? t("guides.tasks.action") : t("guides.tasks.secondaryAction")}
+                onAction={onOpenCreateTask || (() => onNavigate?.("/tasks"))}
+                iconText="01"
+              />
+            </Col>
+          ) : null}
+          {!agents.length ? (
+            <Col xs={24} xl={8}>
+              <NextStepCard
+                title={t("guides.agents.title")}
+                description={t("guides.agents.description")}
+                steps={[t("guides.agents.step1"), t("guides.agents.step2"), t("guides.agents.step3")]}
+                actionLabel={t("guides.agents.action")}
+                onAction={() => onNavigate?.("/themes")}
+                iconText="02"
+              />
+            </Col>
+          ) : null}
+          {!sessions.length ? (
+            <Col xs={24} xl={8}>
+              <NextStepCard
+                title={t("guides.conversations.title")}
+                description={t("guides.conversations.description")}
+                steps={[t("guides.conversations.step1"), t("guides.conversations.step2"), t("guides.conversations.step3")]}
+                actionLabel={t("guides.conversations.action")}
+                onAction={() => onNavigate?.("/conversations")}
+                iconText="03"
+              />
+            </Col>
+          ) : null}
+        </Row>
+      ) : null}
 
       <Row gutter={[16, 16]}>
         <Col xs={24} xl={8}>

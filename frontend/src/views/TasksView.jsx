@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Button, Card, Grid, List, Segmented, Space, Table, Tag, Typography } from "antd";
 import { PlusOutlined } from "@ant-design/icons";
+import NextStepCard from "../components/NextStepCard.jsx";
 import { formatListText, safeArray, statusTag } from "../ui.jsx";
 
 const { Text, Paragraph } = Typography;
@@ -22,6 +23,17 @@ function TasksView({ permissions, tasks, dashboard, onOpenCreateTask, onSelectTa
   useEffect(() => {
     setMode(isCompact ? "cards" : "table");
   }, [isCompact]);
+
+  const taskGuide = (
+    <NextStepCard
+      title={t("guides.tasks.title")}
+      description={t("guides.tasks.description")}
+      steps={[t("guides.tasks.step1"), t("guides.tasks.step2"), t("guides.tasks.step3")]}
+      actionLabel={permissions.taskWrite ? t("guides.tasks.action") : t("guides.tasks.secondaryAction")}
+      onAction={permissions.taskWrite ? onOpenCreateTask : undefined}
+      iconText="T"
+    />
+  );
 
   return (
     <Space direction="vertical" size={16} style={{ width: "100%" }}>
@@ -48,11 +60,12 @@ function TasksView({ permissions, tasks, dashboard, onOpenCreateTask, onSelectTa
         }
         className="workspace-card"
       >
-        {mode === "table" ? (
+        {!tasks.length ? taskGuide : mode === "table" ? (
           <Table
             rowKey="id"
             dataSource={tasks}
             locale={{ emptyText: t("tasks.emptyTasks") }}
+            scroll={{ x: 860 }}
             onRow={(record) => ({
               onClick: () => onSelectTask(record.id),
             })}

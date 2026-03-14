@@ -1,0 +1,13 @@
+.git
+.github
+.playwright
+node_modules
+frontend/node_modules
+frontend/test-results
+frontend/dist
+dist
+coverage
+__pycache__
+*.pyc
+*.pyo
+.DS_Store

@@ -8,3 +8,5 @@ __pycache__/
 dist/
 frontend/test-results/
 frontend/playwright-report/
+.fixture-chub/
+templates/data/

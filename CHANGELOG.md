@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.13.0 - 2026-03-14
+
+### Added
+- Added direct per-agent dialogue entrypoints across Mission Control, including one-click conversation launch from Agent cards, Agent drawers, and a new per-agent launcher inside `/conversations`.
+- Added explicit main-session targeting in the Conversation Center so operators can start from an Agent first instead of hunting through the session list.
+
+### Changed
+- Reframed the conversation workspace from a session browser into an agent-first communication surface, making every configured agent visibly reachable as a dialogue partner.
+- Updated the conversation focus summary so the product clearly shows whether you are looking at a real selected session or preparing to talk to an agent's main session.
+
 ## 1.12.0 - 2026-03-14
 
 ### Added

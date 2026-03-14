@@ -22,7 +22,7 @@ from urllib.parse import parse_qs, quote, urlsplit
 
 
 TERMINAL_STATES = {"done", "cancelled", "canceled"}
-PRODUCT_VERSION = "1.12.0"
+PRODUCT_VERSION = "1.13.0"
 OPENCLAW_BASELINE_RELEASE = "2026.3.12"
 PASSWORD_HASH_ITERATIONS = 260000
 USER_ROLES = {
@@ -1049,6 +1049,63 @@ __STYLE_VARS__
     .conversation-card[data-active="true"] {
       background: color-mix(in srgb, var(--accentSoft) 26%, rgba(255,255,255,0.72));
     }
+    .agent-card-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+    }
+    .agent-launch-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+      gap: 12px;
+    }
+    .agent-launch-card {
+      appearance: none;
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 20px;
+      padding: 14px 15px;
+      background:
+        linear-gradient(150deg, rgba(255,255,255,0.82), rgba(255,255,255,0.58)),
+        radial-gradient(circle at top right, color-mix(in srgb, var(--accentSoft) 28%, transparent), transparent 42%);
+      display: grid;
+      gap: 8px;
+      text-align: left;
+      color: var(--ink);
+      cursor: pointer;
+      transition: transform 150ms ease-out, border-color 150ms ease-out, box-shadow 150ms ease-out;
+    }
+    .agent-launch-card:hover,
+    .agent-launch-card[data-active="true"] {
+      transform: translateY(-2px);
+      border-color: color-mix(in srgb, var(--accent) 28%, var(--line));
+      box-shadow: 0 16px 34px rgba(48, 36, 28, 0.09);
+    }
+    .agent-launch-card[data-active="true"] {
+      background:
+        linear-gradient(150deg, color-mix(in srgb, var(--accentSoft) 24%, rgba(255,255,255,0.88)), rgba(255,255,255,0.68)),
+        radial-gradient(circle at top right, color-mix(in srgb, var(--accentSoft) 42%, transparent), transparent 40%);
+    }
+    .agent-launch-card strong {
+      font-size: 1rem;
+      line-height: 1.3;
+    }
+    .agent-launch-card span {
+      color: var(--muted);
+      font-size: 0.9rem;
+      line-height: 1.55;
+    }
+    .agent-launch-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+      color: var(--muted);
+      font-size: 0.82rem;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
     .conversation-preview {
       color: var(--ink);
       line-height: 1.62;
@@ -1865,7 +1922,7 @@ __STYLE_VARS__
             <div class="panel-head">
               <div>
                 <h2 class="panel-title">Agent 运营台</h2>
-                <p class="panel-subtitle">完整查看每个 Agent 的状态、焦点、在手任务和最近协同信号。</p>
+                <p class="panel-subtitle">完整查看每个 Agent 的状态、焦点、在手任务和最近协同信号，并一键直达它的对话入口。</p>
               </div>
             </div>
             <div class="agent-grid" id="agents-page-grid"></div>
@@ -1935,7 +1992,7 @@ __STYLE_VARS__
               <div class="panel-head">
                 <div>
                   <h2 class="panel-title">会话总览</h2>
-                  <p class="panel-subtitle">现在你不只是看协同，还能直接进入 OpenClaw 的真实 session，查看上下文并继续对话。</p>
+                  <p class="panel-subtitle">现在你不只是看协同，还能直接进入 OpenClaw 的真实 session，或按 Agent 直达主会话继续对话。</p>
                 </div>
               </div>
               <div class="deliverable-list" id="conversation-summary-list"></div>
@@ -2349,6 +2406,8 @@ __STYLE_VARS__
       key: "",
       agentId: "",
       sessionId: "",
+      preferredAgentId: "",
+      mode: "session",
       transcript: null,
       loading: false,
       error: "",
@@ -2845,6 +2904,17 @@ __STYLE_VARS__
         card.append(facts);
 
         card.append(el("div", "focus", agent.focus || "当前没有明确的 progress signal，可以继续观察下一次推进。"));
+
+        const actions = el("div", "agent-card-actions");
+        const talkButton = el("button", supportsConversationWrite() ? "button small" : "button secondary small", supportsConversationWrite() ? "立即对话" : "查看会话");
+        talkButton.type = "button";
+        talkButton.addEventListener("click", (event) => {
+          event.stopPropagation();
+          openConversationForAgent(agent.id);
+        });
+        actions.append(talkButton);
+        actions.append(el("span", "drawer-subtle", "默认直达该 Agent 的主会话"));
+        card.append(actions);
 
         const pills = el("div", "pill-row");
         if ((agent.activeTaskCards || []).length) {
@@ -3752,6 +3822,13 @@ __STYLE_VARS__
       meta.append(el("span", "drawer-chip", `会话 ${agent.sessionLastSeenAgo}`));
       hero.append(meta);
       hero.append(el("div", "focus", agent.focus || "当前没有明确的 progress signal。"));
+      const heroActions = el("div", "action-footer");
+      const talkButton = el("button", supportsConversationWrite() ? "button" : "button secondary", supportsConversationWrite() ? `和 ${agent.title} 对话` : `查看 ${agent.title} 会话`);
+      talkButton.type = "button";
+      talkButton.addEventListener("click", () => openConversationForAgent(agent.id));
+      heroActions.append(talkButton);
+      heroActions.append(el("span", "status-inline", "直接进入该 Agent 的主会话，不需要先从会话列表里翻找。"));
+      hero.append(heroActions);
       refs.drawerBody.append(hero);
 
       const stats = el("div", "drawer-grid");
@@ -3917,6 +3994,54 @@ __STYLE_VARS__
       return (((state.conversations || {}).sessions) || []).find((session) => session.key === conversationState.key) || null;
     }
 
+    function currentConversationTargetAgentId() {
+      const selected = currentConversationSession();
+      return (
+        conversationState.preferredAgentId ||
+        selected?.agentId ||
+        conversationState.agentId ||
+        state.routerAgentId ||
+        (((state.agents || [])[0]) || {}).id ||
+        ""
+      );
+    }
+
+    function currentConversationTargetAgent() {
+      return getAgent(currentConversationTargetAgentId());
+    }
+
+    function focusConversationComposer() {
+      requestAnimationFrame(() => {
+        const input = refs.conversationStudio?.querySelector("[data-conversation-compose='true']");
+        if (!input) return;
+        input.focus();
+        input.scrollIntoView({ block: "center", behavior: "smooth" });
+      });
+    }
+
+    function openConversationForAgent(agentId) {
+      if (!agentId) return;
+      conversationState = {
+        ...conversationState,
+        key: "",
+        agentId: "",
+        sessionId: "",
+        preferredAgentId: agentId,
+        mode: "agent",
+        transcript: null,
+        loading: false,
+        error: "",
+      };
+      selection = { kind: "agent", id: agentId };
+      closeDrawer();
+      if (currentView !== "conversations") {
+        navigate("conversations");
+      } else {
+        renderAll();
+      }
+      focusConversationComposer();
+    }
+
     async function loadConversationTranscript(agentId, sessionId, sessionKey = "", forceReload = false) {
       if (!agentId || !sessionId) {
         conversationState = {
@@ -3924,6 +4049,8 @@ __STYLE_VARS__
           key: sessionKey || "",
           agentId: agentId || "",
           sessionId: sessionId || "",
+          preferredAgentId: agentId || conversationState.preferredAgentId,
+          mode: agentId ? "agent" : conversationState.mode,
           transcript: null,
           loading: false,
           error: "",
@@ -3954,6 +4081,8 @@ __STYLE_VARS__
         key: sessionKey || conversationState.key,
         agentId,
         sessionId,
+        preferredAgentId: agentId,
+        mode: "session",
         loading: true,
         error: "",
       };
@@ -3966,6 +4095,8 @@ __STYLE_VARS__
           key: sessionKey || conversationState.key,
           agentId,
           sessionId,
+          preferredAgentId: agentId,
+          mode: "session",
           transcript: data.conversation || null,
           loading: false,
           error: "",
@@ -3976,6 +4107,8 @@ __STYLE_VARS__
           key: sessionKey || conversationState.key,
           agentId,
           sessionId,
+          preferredAgentId: agentId,
+          mode: "session",
           transcript: null,
           loading: false,
           error: error.message,
@@ -3988,6 +4121,9 @@ __STYLE_VARS__
       const sessions = filteredConversations();
       if (!sessions.length) {
         conversationState = { ...conversationState, key: "", agentId: "", sessionId: "", transcript: null, loading: false, error: "" };
+        return;
+      }
+      if (conversationState.mode === "agent" && conversationState.preferredAgentId) {
         return;
       }
       const current = sessions.find((session) => session.key === conversationState.key);
@@ -4005,6 +4141,7 @@ __STYLE_VARS__
       clearNode(refs.conversationSummaryList);
       const conversations = state.conversations || {};
       const selected = currentConversationSession();
+      const targetAgent = currentConversationTargetAgent();
       [
         {
           title: "真实会话数",
@@ -4012,14 +4149,14 @@ __STYLE_VARS__
           meta: `最近 24 小时活跃 ${(conversations.summary || {}).active24h || 0} · 可继续对话 ${(conversations.summary || {}).talkable || 0}`,
         },
         {
-          title: "当前选中",
-          body: selected ? selected.label : "还没有选中会话。",
-          meta: selected ? `${selected.agentLabel} · ${selected.updatedAgo}` : "选择任意会话后，这里会显示会话上下文。",
+          title: "当前焦点",
+          body: selected ? selected.label : targetAgent ? `${targetAgent.title} 主会话` : "还没有选中会话。",
+          meta: selected ? `${selected.agentLabel} · ${selected.updatedAgo}` : targetAgent ? `${targetAgent.id} · 现在可以直接向它发问` : "选择任意会话后，这里会显示会话上下文。",
         },
         {
           title: "对话模式",
-          body: supportsConversationWrite() ? "Owner / Operator 可以直接在产品里继续向 Agent 发问。" : "当前账号只有查看 transcript 的权限。",
-          meta: "Viewer 只读，避免把生产 Agent 入口完全开放。",
+          body: supportsConversationWrite() ? "Owner / Operator 可以直接在产品里继续向任意 Agent 发问。" : "当前账号只有查看 transcript 的权限。",
+          meta: "Viewer 只读，避免把生产 Agent 入口完全开放；Owner / Operator 则可按 Agent 直达主会话。",
         },
         {
           title: "接入方式",
@@ -4130,11 +4267,49 @@ __STYLE_VARS__
       clearNode(refs.conversationStudio);
       const conversations = state.conversations || {};
       const selected = currentConversationSession();
+      const targetAgent = currentConversationTargetAgent();
+
+      const launchCard = el("section", "studio-card");
+      launchCard.append(el("div", "studio-eyebrow", "Agent Direct"));
+      launchCard.append(el("div", "deliverable-title", "和每个 Agent 单独对话"));
+      launchCard.append(el("div", "studio-copy", "这里不是只有“会话列表”，而是每个 Agent 都能被单独点亮。点一下，就会把发送区切到它的主会话。"));
+      const launchGrid = el("div", "agent-launch-grid");
+      if ((state.agents || []).length) {
+        (state.agents || []).forEach((agent) => {
+          const quick = el("button", "agent-launch-card");
+          quick.type = "button";
+          quick.dataset.active = String(currentConversationTargetAgentId() === agent.id);
+          quick.addEventListener("click", () => openConversationForAgent(agent.id));
+          quick.append(el("strong", "", agent.title));
+          quick.append(el("span", "", `${agent.name} · ${agent.id}`));
+          const meta = el("div", "agent-launch-meta");
+          meta.append(el("span", "", `${agent.activeTasks} 个在手任务`));
+          meta.append(el("span", "", `最近信号 ${agent.lastSeenAgo}`));
+          quick.append(meta);
+          launchGrid.append(quick);
+        });
+      } else {
+        launchGrid.append(el("div", "empty", "当前没有可供对话的 Agent。"));
+      }
+      launchCard.append(launchGrid);
+      refs.conversationStudio.append(launchCard);
+
       const sessionCard = el("section", "studio-card");
       sessionCard.append(el("div", "studio-eyebrow", "Session Focus"));
       if (!selected) {
-        sessionCard.append(el("div", "deliverable-title", "还没有选中会话"));
-        sessionCard.append(el("div", "studio-copy", "你可以从左侧选择一条真实会话，或者直接发给某个 Agent 的主会话。"));
+        if (targetAgent) {
+          sessionCard.append(el("div", "deliverable-title", `${targetAgent.title} 主会话已就绪`));
+          sessionCard.append(el("div", "selection-meta", `${targetAgent.name} · ${targetAgent.id} · ${targetAgent.model}`));
+          sessionCard.append(el("div", "studio-copy", "现在发送区会默认把消息发给这个 Agent 的主会话。你也可以随时从左侧切到它最近的一条真实 session。"));
+          const chips = el("div", "drawer-chip-row");
+          ["主会话直达", targetAgent.status, `${targetAgent.activeTasks} 个在手任务`].forEach((label) => {
+            chips.append(el("span", "drawer-chip", label));
+          });
+          sessionCard.append(chips);
+        } else {
+          sessionCard.append(el("div", "deliverable-title", "还没有选中会话"));
+          sessionCard.append(el("div", "studio-copy", "你可以从左侧选择一条真实会话，或者直接发给某个 Agent 的主会话。"));
+        }
       } else {
         sessionCard.append(el("div", "deliverable-title", selected.label));
         sessionCard.append(el("div", "selection-meta", `${selected.agentLabel} · ${selected.sourceLabel} · ${selected.updatedAgo}`));
@@ -4152,7 +4327,7 @@ __STYLE_VARS__
       const composeCard = el("section", "studio-card");
       composeCard.append(el("div", "studio-eyebrow", "Talk"));
       composeCard.append(el("div", "deliverable-title", "直接向 Agent 发问"));
-      composeCard.append(el("div", "studio-copy", "继续当前会话时，会把消息发进选中的 session；不继续时，会默认落到所选 Agent 的主会话。"));
+      composeCard.append(el("div", "studio-copy", "继续当前会话时，会把消息发进选中的 session；不继续时，会默认落到所选 Agent 的主会话。现在每个 Agent 都有自己的直达入口。"));
 
       if (!supportsConversationWrite()) {
         composeCard.append(el("div", "empty", conversations.supported ? "当前账号只有查看 transcript 的权限。" : "当前环境还不能访问真实会话。"));
@@ -4171,7 +4346,7 @@ __STYLE_VARS__
       }
 
       const form = el("form", "studio-form");
-      const agentInput = makeSelect(agentOptions, selected?.agentId || state.routerAgentId || agentOptions[0].value);
+      const agentInput = makeSelect(agentOptions, currentConversationTargetAgentId() || state.routerAgentId || agentOptions[0].value);
       const continueCurrent = makeCheckbox("继续当前选中的真实会话", Boolean(selected?.talkable));
       continueCurrent.input.disabled = !selected?.talkable;
       const thinkingInput = makeSelect([
@@ -4182,6 +4357,7 @@ __STYLE_VARS__
         { value: "high", label: "high" },
       ], "low");
       const messageInput = makeTextarea("例如：汇总今天尚书省还没收口的事项，并告诉我下一步该拍板什么。", "", 5);
+      messageInput.dataset.conversationCompose = "true";
       const submit = el("button", "button", "发送消息");
       submit.type = "submit";
       const inline = el("div", "status-inline", "发送成功后，右侧 transcript 会立即刷新成真实对话结果。");
@@ -4194,6 +4370,13 @@ __STYLE_VARS__
       footer.append(submit);
       footer.append(inline);
       form.append(footer);
+
+      agentInput.addEventListener("change", () => {
+        conversationState = {
+          ...conversationState,
+          preferredAgentId: agentInput.value,
+        };
+      });
 
       form.addEventListener("submit", async (event) => {
         event.preventDefault();
@@ -4218,6 +4401,8 @@ __STYLE_VARS__
               key: data.session?.key || conversationState.key,
               agentId: data.conversation.agentId || (data.session || {}).agentId || agentInput.value,
               sessionId: data.conversation.sessionId || (data.session || {}).sessionId || "",
+              preferredAgentId: data.conversation.agentId || (data.session || {}).agentId || agentInput.value,
+              mode: "session",
               transcript: data.conversation,
               loading: false,
               error: "",

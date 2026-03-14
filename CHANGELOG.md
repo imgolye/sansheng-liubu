@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.12.0 - 2026-03-14
+
+### Added
+- Added a Conversation Center inside Mission Control with `/conversations`, real OpenClaw session browsing, transcript inspection, and direct in-product dialogue with agents.
+- Added `/api/conversations` and `/api/conversations/transcript` so the product can read native OpenClaw sessions and per-session jsonl transcripts without inventing a parallel chat store.
+- Added authenticated in-product conversation actions backed by `openclaw agent --json`, including transcript refresh after each message.
+
+### Changed
+- Expanded Mission Control from “see + operate” into “see + operate + converse”, so operators can stay inside the product for both task control and live agent dialogue.
+- Introduced a dedicated conversation permission for `Owner / Operator`, keeping `Viewer` read-only while still exposing real transcript visibility.
+
+### Fixed
+- Fixed mixed-output parsing for `openclaw agent --json` and `openclaw sessions --json`, so plugin logs no longer break conversation data or chat actions.
+- Fixed product refresh behavior so sending a conversation message immediately refreshes the session list and transcript instead of waiting for passive polling.
+
 ## 1.11.0 - 2026-03-14
 
 ### Added

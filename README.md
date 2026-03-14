@@ -4,15 +4,18 @@
 
 一键部署 11 个协作 AI Agent，模拟组织架构处理复杂任务。
 
-## 1.11.0 亮点
+## 1.12.0 亮点
 
-现在不只是一个“本地操作台”，而是开始具备商业后台、Skills Center，以及 OpenClaw 原生控制中心能力的多 Agent 产品：
+现在不只是一个“本地操作台”，而是已经具备商业后台、Skills Center、OpenClaw 原生控制中心，以及真实会话中心能力的多 Agent 产品：
 
 ```bash
 python3 ~/.openclaw/workspace-your-router-id/scripts/collaboration_dashboard.py --serve
 ```
 
 这一版新增：
+- 会话中心：新增 `/conversations`，直接浏览 OpenClaw 真实 sessions、查看 jsonl transcript，并继续与 Agent 对话
+- 产品内对话：Owner / Operator 可以直接在产品里向选中 Agent 或当前 session 发消息，不再必须回终端
+- 原生会话 API：新增 `/api/conversations` 和 `/api/conversations/transcript`
 - OpenClaw Control Center：新增 `/openclaw`，直接查看官方版本、schema 校验、gateway 健康、managed skills 目录和原生 skills 可用性
 - OpenClaw 原生 API 映射：新增 `/api/openclaw`，给产品内和外部自动化直接读 OpenClaw 运行态
 - Skills Center：新增 `/skills`，直接管理本地 skill 目录、校验质量、生成脚手架和打包 zip
@@ -21,15 +24,15 @@ python3 ~/.openclaw/workspace-your-router-id/scripts/collaboration_dashboard.py 
 - 示例 skill：仓库内置 `mission-control-release-ops`，直接演示 Anthropic 推荐的 frontmatter + references 渐进披露模式
 - OpenClaw 适配基线：按 `OpenClaw 2026.3.12+` 适配，并兼容 CLI 在 JSON 前后夹带 warning / plugin 日志的场景
 - 团队账号登录：日常使用改走账号密码，`Owner Token` 只保留给初始化和紧急接管
-- 角色权限体系：`Owner / Operator / Viewer` 三层权限，收口任务、主题和后台动作
+- 角色权限体系：`Owner / Operator / Viewer` 三层权限，收口任务、对话、主题和后台动作
 - 商业后台：新增 `/admin`，可管理团队席位、角色状态、密码重置和审计日志
 - 席位治理：支持激活 / 停用账号，且会阻止你把最后一个活跃 Owner 锁死
 - 后台敏感数据分层：静态快照只保留聚合统计，具体成员名单和审计流只对已登录授权会话开放
 - 多模块 Mission Control：总览、Agent 运营、交付执行、活动时间线、主题中心
 - 本地实时 Web 应用：`--serve` 会启动带 SSE 推送的常驻产品面板
 - 本地登录：先访问 `/login`，通过签名 cookie 会话进入受保护的产品界面
-- 深链接路由：`/agents`、`/tasks`、`/activity`、`/themes`、`/skills`、`/openclaw`、`/admin`
-- 本地 API：`/api/agents`、`/api/tasks`、`/api/events`、`/api/themes`、`/api/skills`、`/api/openclaw`、`/api/deliverables`、`/api/admin`
+- 深链接路由：`/agents`、`/tasks`、`/conversations`、`/activity`、`/themes`、`/skills`、`/openclaw`、`/admin`
+- 本地 API：`/api/agents`、`/api/tasks`、`/api/conversations`、`/api/conversations/transcript`、`/api/events`、`/api/themes`、`/api/skills`、`/api/openclaw`、`/api/deliverables`、`/api/admin`
 - 可调布局：支持收起菜单，并在运营 / 聚焦 / 紧凑三种布局间切换
 - 操作工作台：直接在产品里创建任务，不再先回终端
 - 任务操作抽屉：可在任务详情里追加进展、标记阻塞、标记完成

@@ -22,19 +22,19 @@ from urllib.parse import parse_qs, quote, urlsplit
 
 
 TERMINAL_STATES = {"done", "cancelled", "canceled"}
-PRODUCT_VERSION = "1.11.0"
+PRODUCT_VERSION = "1.12.0"
 OPENCLAW_BASELINE_RELEASE = "2026.3.12"
 PASSWORD_HASH_ITERATIONS = 260000
 USER_ROLES = {
     "owner": {
         "label": "Owner",
         "description": "管理产品、成员、主题和高风险动作。",
-        "permissions": {"read", "task_write", "theme_write", "admin_write", "audit_view"},
+        "permissions": {"read", "task_write", "conversation_write", "theme_write", "admin_write", "audit_view"},
     },
     "operator": {
         "label": "Operator",
         "description": "负责推进任务、维护交付和处理运营现场。",
-        "permissions": {"read", "task_write", "audit_view"},
+        "permissions": {"read", "task_write", "conversation_write", "audit_view"},
     },
     "viewer": {
         "label": "Viewer",
@@ -1018,6 +1018,114 @@ __STYLE_VARS__
       background: linear-gradient(90deg, var(--accent), var(--accentSoft));
       transition: width 220ms ease-out;
     }
+    .conversation-shell {
+      display: grid;
+      grid-template-columns: minmax(320px, 0.9fr) minmax(0, 1.4fr);
+      gap: 18px;
+      align-items: start;
+    }
+    .conversation-list,
+    .transcript-stream {
+      padding: 18px;
+      display: grid;
+      gap: 12px;
+    }
+    .conversation-card {
+      border-radius: 20px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,0.58);
+      padding: 16px;
+      display: grid;
+      gap: 10px;
+      cursor: pointer;
+      transition: transform 150ms ease-out, border-color 150ms ease-out, box-shadow 150ms ease-out;
+    }
+    .conversation-card:hover,
+    .conversation-card[data-active="true"] {
+      transform: translateY(-2px);
+      border-color: color-mix(in srgb, var(--accent) 28%, var(--line));
+      box-shadow: 0 16px 34px rgba(48, 36, 28, 0.09);
+    }
+    .conversation-card[data-active="true"] {
+      background: color-mix(in srgb, var(--accentSoft) 26%, rgba(255,255,255,0.72));
+    }
+    .conversation-preview {
+      color: var(--ink);
+      line-height: 1.62;
+      display: -webkit-box;
+      -webkit-box-orient: vertical;
+      -webkit-line-clamp: 3;
+      overflow: hidden;
+    }
+    .transcript-stream {
+      min-height: 420px;
+      max-height: min(72vh, 920px);
+      overflow: auto;
+      background:
+        linear-gradient(180deg, rgba(255,255,255,0.6), rgba(255,255,255,0.42)),
+        radial-gradient(circle at top right, color-mix(in srgb, var(--accentSoft) 38%, transparent), transparent 44%);
+    }
+    .transcript-message {
+      display: grid;
+      gap: 8px;
+      justify-items: start;
+    }
+    .transcript-message[data-kind="assistant"] {
+      justify-items: end;
+    }
+    .transcript-meta {
+      font-size: 0.82rem;
+      color: var(--muted);
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+    .transcript-bubble {
+      max-width: min(86%, 760px);
+      border-radius: 22px;
+      padding: 14px 16px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,0.76);
+      line-height: 1.68;
+      white-space: pre-wrap;
+      word-break: break-word;
+      box-shadow: 0 12px 24px rgba(32, 22, 16, 0.04);
+    }
+    .transcript-message[data-kind="assistant"] .transcript-bubble {
+      background: color-mix(in srgb, var(--accentSoft) 34%, rgba(255,255,255,0.78));
+      border-color: color-mix(in srgb, var(--accent) 18%, var(--line));
+    }
+    .transcript-message[data-kind="tool_call"] .transcript-bubble,
+    .transcript-message[data-kind="tool_result"] .transcript-bubble {
+      background: rgba(255,255,255,0.58);
+      border-style: dashed;
+    }
+    .transcript-message[data-kind="tool_result"][data-error="true"] .transcript-bubble {
+      border-color: color-mix(in srgb, var(--danger) 38%, var(--line));
+      background: color-mix(in srgb, var(--danger) 8%, rgba(255,255,255,0.68));
+    }
+    .transcript-summary {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+    }
+    .transcript-stat {
+      padding: 12px;
+      border-radius: 16px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,0.6);
+    }
+    .transcript-stat span {
+      display: block;
+      color: var(--muted);
+      font-size: 0.78rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+    .transcript-stat strong {
+      display: block;
+      margin-top: 4px;
+      font-size: 1rem;
+    }
     .task-copy {
       line-height: 1.65;
     }
@@ -1586,6 +1694,7 @@ __STYLE_VARS__
       .rail { position: static; }
       .topbar { grid-template-columns: 1fr; }
       .overview-grid, .split-grid { grid-template-columns: 1fr; }
+      .conversation-shell { grid-template-columns: 1fr; }
       .studio-grid, .drawer-action-grid { grid-template-columns: 1fr; }
       .status-strip { grid-template-columns: repeat(3, minmax(0, 1fr)); }
       .metric-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
@@ -1598,6 +1707,7 @@ __STYLE_VARS__
       .app-shell[data-rail="collapsed"] { grid-template-columns: 1fr; }
       .hero { padding: 22px 18px 20px; border-radius: 24px; }
       .metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .transcript-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .relay-grid { grid-template-columns: 1fr; }
       .status-strip { grid-template-columns: 1fr 1fr; }
       .agent-facts, .drawer-grid { grid-template-columns: 1fr 1fr; }
@@ -1635,6 +1745,7 @@ __STYLE_VARS__
           <button class="nav-link" data-view="overview">总览<span>关键指标、接力网和现场概览</span></button>
           <button class="nav-link" data-view="agents">Agent 运营<span>完整 roster、状态分布和负责人现场</span></button>
           <button class="nav-link" data-view="tasks">交付执行<span>任务河道、筛选、已完成交付物</span></button>
+          <button class="nav-link" data-view="conversations">会话中心<span>真实 sessions、对话记录和直接发问</span></button>
           <button class="nav-link" data-view="activity">活动时间线<span>handoff 与 progress 的完整动态</span></button>
           <button class="nav-link" data-view="themes">主题中心<span>当前组织主题与产品运行命令</span></button>
           <button class="nav-link" data-view="skills">Skills Center<span>技能目录、校验、脚手架与打包</span></button>
@@ -1814,6 +1925,53 @@ __STYLE_VARS__
                 </div>
               </div>
               <div class="command-list" id="task-command-list"></div>
+            </section>
+          </div>
+        </section>
+
+        <section class="view" data-view="conversations" hidden>
+          <div class="split-grid">
+            <section class="panel">
+              <div class="panel-head">
+                <div>
+                  <h2 class="panel-title">会话总览</h2>
+                  <p class="panel-subtitle">现在你不只是看协同，还能直接进入 OpenClaw 的真实 session，查看上下文并继续对话。</p>
+                </div>
+              </div>
+              <div class="deliverable-list" id="conversation-summary-list"></div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-head">
+                <div>
+                  <h2 class="panel-title">对话命令</h2>
+                  <p class="panel-subtitle">产品里可以直接聊，终端里也保留官方命令入口，方便自动化和排障。</p>
+                </div>
+              </div>
+              <div class="command-list" id="conversation-command-list"></div>
+            </section>
+          </div>
+
+          <div class="conversation-shell">
+            <section class="panel">
+              <div class="panel-head">
+                <div>
+                  <h2 class="panel-title">真实会话列表</h2>
+                  <p class="panel-subtitle">这里读的是 OpenClaw `sessions --all-agents` 的真实索引，不是产品自己生成的影子会话。</p>
+                </div>
+              </div>
+              <div class="conversation-list" id="conversation-list"></div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-head">
+                <div>
+                  <h2 class="panel-title">对话现场</h2>
+                  <p class="panel-subtitle">查看选中会话的真实 transcript，并直接继续发问。未选会话时，会默认发给所选 Agent 的主会话。</p>
+                </div>
+              </div>
+              <div class="studio-grid" id="conversation-studio"></div>
+              <div class="transcript-stream" id="conversation-transcript"></div>
             </section>
           </div>
         </section>
@@ -2079,6 +2237,10 @@ __STYLE_VARS__
         title: "交付执行",
         subtitle: "把任务河道、交付物和 runbook 放在同一个工作台。",
       },
+      conversations: {
+        title: "会话中心",
+        subtitle: "进入真实 OpenClaw sessions，看 transcript，也能直接继续和 Agent 对话。",
+      },
       activity: {
         title: "活动时间线",
         subtitle: "按时间追踪 handoff 与 progress，快速还原协同路径。",
@@ -2126,6 +2288,11 @@ __STYLE_VARS__
       tasksPageList: document.getElementById("tasks-page-list"),
       deliverablesList: document.getElementById("deliverables-list"),
       taskCommandList: document.getElementById("task-command-list"),
+      conversationSummaryList: document.getElementById("conversation-summary-list"),
+      conversationCommandList: document.getElementById("conversation-command-list"),
+      conversationList: document.getElementById("conversation-list"),
+      conversationStudio: document.getElementById("conversation-studio"),
+      conversationTranscript: document.getElementById("conversation-transcript"),
       activityRelayGrid: document.getElementById("activity-relay-grid"),
       activityEventFeed: document.getElementById("activity-event-feed"),
       currentThemeSummary: document.getElementById("current-theme-summary"),
@@ -2178,6 +2345,14 @@ __STYLE_VARS__
     let currentView = getViewFromLocation();
     let searchQuery = "";
     let taskFilter = "active";
+    let conversationState = {
+      key: "",
+      agentId: "",
+      sessionId: "",
+      transcript: null,
+      loading: false,
+      error: "",
+    };
     let layoutMode = localStorage.getItem("sansheng-layout-mode") || "operations";
     let railCollapsed = localStorage.getItem("sansheng-rail-collapsed") === "true";
 
@@ -2224,6 +2399,7 @@ __STYLE_VARS__
         "/collaboration-dashboard.html": "overview",
         "/agents": "agents",
         "/tasks": "tasks",
+        "/conversations": "conversations",
         "/activity": "activity",
         "/themes": "themes",
         "/skills": "skills",
@@ -2362,6 +2538,23 @@ __STYLE_VARS__
       );
     }
 
+    function conversationSearchBlob(session) {
+      return [
+        session.label,
+        session.agentId,
+        session.agentLabel,
+        session.key,
+        session.sourceLabel,
+        session.model,
+        session.provider,
+        session.preview,
+      ].join(" ");
+    }
+
+    function filteredConversations() {
+      return (((state.conversations || {}).sessions) || []).filter((session) => matchesQuery(conversationSearchBlob(session)));
+    }
+
     function copyText(text) {
       if (navigator.clipboard && window.isSecureContext) {
         return navigator.clipboard.writeText(text);
@@ -2401,6 +2594,10 @@ __STYLE_VARS__
 
     function supportsThemeSwitch() {
       return supportsActions() && Boolean(runtimeCaps().themeSwitchAvailable);
+    }
+
+    function supportsConversationWrite() {
+      return supportsActions() && hasPermission("conversationWrite");
     }
 
     function currentUser() {
@@ -2465,6 +2662,23 @@ __STYLE_VARS__
         renderAll();
       } else if (supportsHttp) {
         await fetchLatestDashboard("manual");
+      }
+      return data;
+    }
+
+    async function getJson(path) {
+      const response = await fetch(path, {
+        credentials: "same-origin",
+        cache: "no-store",
+      });
+      let data = {};
+      try {
+        data = await response.json();
+      } catch (_error) {
+        data = {};
+      }
+      if (!response.ok) {
+        throw new Error(data.message || data.error || `HTTP ${response.status}`);
       }
       return data;
     }
@@ -3022,6 +3236,7 @@ __STYLE_VARS__
         [
           ["读数据", role.permissions.read],
           ["任务动作", role.permissions.taskWrite],
+          ["会话对话", role.permissions.conversationWrite],
           ["主题切换", role.permissions.themeWrite],
           ["成员管理", role.permissions.adminWrite],
           ["审计查看", role.permissions.auditView],
@@ -3698,6 +3913,341 @@ __STYLE_VARS__
       renderCommandCards(refs.taskCommandList, state.commands || [], "当前没有可用命令。");
     }
 
+    function currentConversationSession() {
+      return (((state.conversations || {}).sessions) || []).find((session) => session.key === conversationState.key) || null;
+    }
+
+    async function loadConversationTranscript(agentId, sessionId, sessionKey = "", forceReload = false) {
+      if (!agentId || !sessionId) {
+        conversationState = {
+          ...conversationState,
+          key: sessionKey || "",
+          agentId: agentId || "",
+          sessionId: sessionId || "",
+          transcript: null,
+          loading: false,
+          error: "",
+        };
+        renderAll();
+        return;
+      }
+      if (
+        !forceReload &&
+        conversationState.loading &&
+        conversationState.agentId === agentId &&
+        conversationState.sessionId === sessionId
+      ) {
+        return;
+      }
+      if (
+        !forceReload &&
+        conversationState.transcript &&
+        conversationState.agentId === agentId &&
+        conversationState.sessionId === sessionId
+      ) {
+        conversationState = { ...conversationState, key: sessionKey || conversationState.key, error: "" };
+        renderAll();
+        return;
+      }
+      conversationState = {
+        ...conversationState,
+        key: sessionKey || conversationState.key,
+        agentId,
+        sessionId,
+        loading: true,
+        error: "",
+      };
+      renderAll();
+      try {
+        const query = new URLSearchParams({ agentId, sessionId }).toString();
+        const data = await getJson(`/api/conversations/transcript?${query}`);
+        conversationState = {
+          ...conversationState,
+          key: sessionKey || conversationState.key,
+          agentId,
+          sessionId,
+          transcript: data.conversation || null,
+          loading: false,
+          error: "",
+        };
+      } catch (error) {
+        conversationState = {
+          ...conversationState,
+          key: sessionKey || conversationState.key,
+          agentId,
+          sessionId,
+          transcript: null,
+          loading: false,
+          error: error.message,
+        };
+      }
+      renderAll();
+    }
+
+    function ensureConversationSelection() {
+      const sessions = filteredConversations();
+      if (!sessions.length) {
+        conversationState = { ...conversationState, key: "", agentId: "", sessionId: "", transcript: null, loading: false, error: "" };
+        return;
+      }
+      const current = sessions.find((session) => session.key === conversationState.key);
+      if (current) {
+        if (!conversationState.transcript && !conversationState.loading) {
+          void loadConversationTranscript(current.agentId, current.sessionId, current.key);
+        }
+        return;
+      }
+      const fallback = sessions[0];
+      void loadConversationTranscript(fallback.agentId, fallback.sessionId, fallback.key);
+    }
+
+    function renderConversationSummary() {
+      clearNode(refs.conversationSummaryList);
+      const conversations = state.conversations || {};
+      const selected = currentConversationSession();
+      [
+        {
+          title: "真实会话数",
+          body: `当前共识别 ${(conversations.summary || {}).total || 0} 个 OpenClaw session。`,
+          meta: `最近 24 小时活跃 ${(conversations.summary || {}).active24h || 0} · 可继续对话 ${(conversations.summary || {}).talkable || 0}`,
+        },
+        {
+          title: "当前选中",
+          body: selected ? selected.label : "还没有选中会话。",
+          meta: selected ? `${selected.agentLabel} · ${selected.updatedAgo}` : "选择任意会话后，这里会显示会话上下文。",
+        },
+        {
+          title: "对话模式",
+          body: supportsConversationWrite() ? "Owner / Operator 可以直接在产品里继续向 Agent 发问。" : "当前账号只有查看 transcript 的权限。",
+          meta: "Viewer 只读，避免把生产 Agent 入口完全开放。",
+        },
+        {
+          title: "接入方式",
+          body: "产品前端直接调用 OpenClaw 的 sessions 和 agent CLI，不另建影子消息系统。",
+          meta: "你看到的 transcript 来自 agents/*/sessions/*.jsonl。",
+        },
+      ].forEach((item) => {
+        const card = el("div", "deliverable-card");
+        card.append(el("div", "deliverable-title", item.title));
+        card.append(el("div", "command-desc", item.body));
+        card.append(el("div", "path-line", item.meta));
+        refs.conversationSummaryList.append(card);
+      });
+    }
+
+    function renderConversationList() {
+      clearNode(refs.conversationList);
+      const conversations = state.conversations || {};
+      if (!conversations.supported) {
+        refs.conversationList.append(el("div", "empty", conversations.error || "当前环境无法读取 OpenClaw 会话索引。"));
+        return;
+      }
+      const sessions = filteredConversations();
+      if (!sessions.length) {
+        refs.conversationList.append(el("div", "empty", "当前没有匹配搜索条件的会话。"));
+        return;
+      }
+      sessions.forEach((session) => {
+        const card = el("article", "conversation-card");
+        card.dataset.active = String(session.key === conversationState.key);
+        card.tabIndex = 0;
+        const head = el("div", "deliverable-head");
+        const left = el("div");
+        left.append(el("div", "deliverable-title", session.label));
+        left.append(el("div", "list-meta", `${session.agentLabel} · ${session.sourceLabel} · ${session.updatedAgo}`));
+        head.append(left);
+        head.append(el("div", "theme-badge", session.talkable ? "可对话" : "只读"));
+        card.append(head);
+        card.append(el("div", "conversation-preview", session.preview || "暂时没有可展示的消息摘要。"));
+        const chips = el("div", "drawer-chip-row");
+        [
+          session.model || "unknown model",
+          session.provider || "unknown provider",
+          session.kind || "direct",
+          session.abortedLastRun ? "上次异常中断" : "最近运行正常",
+        ].forEach((label) => chips.append(el("span", "drawer-chip", label)));
+        card.append(chips);
+        const open = () => void loadConversationTranscript(session.agentId, session.sessionId, session.key, false);
+        card.addEventListener("click", open);
+        card.addEventListener("keydown", (event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            open();
+          }
+        });
+        refs.conversationList.append(card);
+      });
+    }
+
+    function renderConversationTranscript() {
+      clearNode(refs.conversationTranscript);
+      const selected = currentConversationSession();
+      if (conversationState.loading) {
+        refs.conversationTranscript.append(el("div", "empty", "正在载入真实会话 transcript。"));
+        return;
+      }
+      if (conversationState.error) {
+        refs.conversationTranscript.append(el("div", "empty", conversationState.error));
+        return;
+      }
+      if (!selected || !conversationState.transcript) {
+        refs.conversationTranscript.append(el("div", "empty", "先从左侧选择一个会话，或直接向某个 Agent 的主会话发起对话。"));
+        return;
+      }
+
+      const summary = el("div", "transcript-summary");
+      [
+        ["Agent", selected.agentLabel || selected.agentId],
+        ["模型", conversationState.transcript.meta?.model || selected.model || "unknown"],
+        ["轮次", (conversationState.transcript.stats || {}).turns || 0],
+        ["工具", (conversationState.transcript.stats || {}).toolMessages || 0],
+      ].forEach(([label, value]) => {
+        const box = el("div", "transcript-stat");
+        box.append(el("span", "", label));
+        box.append(el("strong", "", String(value)));
+        summary.append(box);
+      });
+      refs.conversationTranscript.append(summary);
+
+      const items = conversationState.transcript.items || [];
+      if (!items.length) {
+        refs.conversationTranscript.append(el("div", "empty", "该会话暂时还没有可展示的消息。"));
+        return;
+      }
+      items.forEach((item) => {
+        const row = el("article", "transcript-message");
+        row.dataset.kind = item.kind || "assistant";
+        if (item.error) {
+          row.dataset.error = "true";
+        }
+        row.append(el("div", "transcript-meta", `${item.title || "消息"} · ${item.at ? formatClock(item.at) : "未知时间"}`));
+        row.append(el("div", "transcript-bubble", item.text || " "));
+        refs.conversationTranscript.append(row);
+      });
+    }
+
+    function renderConversationStudio() {
+      clearNode(refs.conversationStudio);
+      const conversations = state.conversations || {};
+      const selected = currentConversationSession();
+      const sessionCard = el("section", "studio-card");
+      sessionCard.append(el("div", "studio-eyebrow", "Session Focus"));
+      if (!selected) {
+        sessionCard.append(el("div", "deliverable-title", "还没有选中会话"));
+        sessionCard.append(el("div", "studio-copy", "你可以从左侧选择一条真实会话，或者直接发给某个 Agent 的主会话。"));
+      } else {
+        sessionCard.append(el("div", "deliverable-title", selected.label));
+        sessionCard.append(el("div", "selection-meta", `${selected.agentLabel} · ${selected.sourceLabel} · ${selected.updatedAgo}`));
+        sessionCard.append(el("div", "studio-copy", selected.preview || "这条会话还没有最近摘要。"));
+        const chips = el("div", "drawer-chip-row");
+        [
+          selected.model || "unknown model",
+          selected.provider || "unknown provider",
+          selected.talkable ? "可继续对话" : "当前只读",
+        ].forEach((label) => chips.append(el("span", "drawer-chip", label)));
+        sessionCard.append(chips);
+      }
+      refs.conversationStudio.append(sessionCard);
+
+      const composeCard = el("section", "studio-card");
+      composeCard.append(el("div", "studio-eyebrow", "Talk"));
+      composeCard.append(el("div", "deliverable-title", "直接向 Agent 发问"));
+      composeCard.append(el("div", "studio-copy", "继续当前会话时，会把消息发进选中的 session；不继续时，会默认落到所选 Agent 的主会话。"));
+
+      if (!supportsConversationWrite()) {
+        composeCard.append(el("div", "empty", conversations.supported ? "当前账号只有查看 transcript 的权限。" : "当前环境还不能访问真实会话。"));
+        refs.conversationStudio.append(composeCard);
+        return;
+      }
+
+      const agentOptions = (state.agents || []).map((agent) => ({
+        value: agent.id,
+        label: `${agent.title} · ${agent.id}`,
+      }));
+      if (!agentOptions.length) {
+        composeCard.append(el("div", "empty", "当前没有可供对话的 Agent。"));
+        refs.conversationStudio.append(composeCard);
+        return;
+      }
+
+      const form = el("form", "studio-form");
+      const agentInput = makeSelect(agentOptions, selected?.agentId || state.routerAgentId || agentOptions[0].value);
+      const continueCurrent = makeCheckbox("继续当前选中的真实会话", Boolean(selected?.talkable));
+      continueCurrent.input.disabled = !selected?.talkable;
+      const thinkingInput = makeSelect([
+        { value: "off", label: "off" },
+        { value: "minimal", label: "minimal" },
+        { value: "low", label: "low" },
+        { value: "medium", label: "medium" },
+        { value: "high", label: "high" },
+      ], "low");
+      const messageInput = makeTextarea("例如：汇总今天尚书省还没收口的事项，并告诉我下一步该拍板什么。", "", 5);
+      const submit = el("button", "button", "发送消息");
+      submit.type = "submit";
+      const inline = el("div", "status-inline", "发送成功后，右侧 transcript 会立即刷新成真实对话结果。");
+
+      form.append(makeField("目标 Agent", agentInput, "如果你继续当前会话，这里会自动跟随所选 session 的 Agent。"));
+      form.append(continueCurrent.wrap);
+      form.append(makeField("Thinking", thinkingInput, "对复杂判断可切高一点；默认 low 更适合日常对话。"));
+      form.append(makeField("消息内容", messageInput, "建议直接写结果导向的问题，不需要解释这套系统怎么工作。"));
+      const footer = el("div", "action-footer");
+      footer.append(submit);
+      footer.append(inline);
+      form.append(footer);
+
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const message = messageInput.value.trim();
+        if (!message) {
+          inline.textContent = "请先写一条消息。";
+          showToast("请先写一条消息。", "warn");
+          return;
+        }
+        const useCurrentSession = continueCurrent.input.checked && selected && selected.talkable;
+        setButtonBusy(submit, true, "发送中...");
+        inline.textContent = "正在向 OpenClaw Agent 发起真实对话。";
+        try {
+          const data = await postActionJson("/api/actions/conversations/send", {
+            agentId: useCurrentSession ? selected.agentId : agentInput.value,
+            sessionId: useCurrentSession ? selected.sessionId : "",
+            message,
+            thinking: thinkingInput.value,
+          });
+          if (data.conversation) {
+            conversationState = {
+              key: data.session?.key || conversationState.key,
+              agentId: data.conversation.agentId || (data.session || {}).agentId || agentInput.value,
+              sessionId: data.conversation.sessionId || (data.session || {}).sessionId || "",
+              transcript: data.conversation,
+              loading: false,
+              error: "",
+            };
+          }
+          inline.textContent = data.message || "消息已发送。";
+          messageInput.value = "";
+          showToast(data.message || "消息已发送。", "success");
+        } catch (error) {
+          inline.textContent = error.message;
+          showToast(error.message, "error");
+        } finally {
+          setButtonBusy(submit, false);
+          renderAll();
+        }
+      });
+
+      composeCard.append(form);
+      refs.conversationStudio.append(composeCard);
+    }
+
+    function renderConversationsView() {
+      ensureConversationSelection();
+      renderConversationSummary();
+      renderConversationList();
+      renderConversationStudio();
+      renderConversationTranscript();
+      renderCommandCards(refs.conversationCommandList, (state.conversations || {}).commands || [], "当前没有可用的对话命令。");
+    }
+
     function renderActivityView() {
       renderRelaysInto(refs.activityRelayGrid, state.relays || [], "最近 24 小时还没有形成 handoff 网络。");
       renderEventsInto(refs.activityEventFeed, filteredEvents(), "当前没有匹配的活动事件。");
@@ -4103,6 +4653,7 @@ __STYLE_VARS__
       renderOverview();
       renderAgentsView();
       renderTasksView();
+      renderConversationsView();
       renderActivityView();
       renderThemesView();
       renderSkillsSurface();
@@ -4286,6 +4837,13 @@ def now_iso():
     return now_utc().isoformat().replace("+00:00", "Z")
 
 
+def epoch_ms_to_iso(value):
+    try:
+        return datetime.fromtimestamp(int(value) / 1000, tz=timezone.utc).isoformat().replace("+00:00", "Z")
+    except Exception:
+        return ""
+
+
 PAYLOAD_CACHE = {}
 
 
@@ -4381,6 +4939,278 @@ def get_router_agent_id(config):
             return agent["id"]
     agents = load_agents(config)
     return agents[0]["id"] if agents else "taizi"
+
+
+CONVERSATION_SOURCE_LABELS = {
+    "main": "主会话",
+    "telegram": "Telegram",
+    "qqbot": "QQ Bot",
+    "feishu": "飞书",
+    "whatsapp": "WhatsApp",
+    "discord": "Discord",
+    "slack": "Slack",
+    "cron": "定时任务",
+    "subagent": "子代理",
+}
+READ_ONLY_CONVERSATION_SOURCES = {"cron", "subagent"}
+
+
+def conversation_source_from_key(session_key):
+    parts = str(session_key or "").split(":")
+    return parts[2] if len(parts) > 2 else "main"
+
+
+def conversation_label(session):
+    session_key = str(session.get("key", "") or "")
+    parts = session_key.split(":")
+    source = conversation_source_from_key(session_key)
+    agent_id = session.get("agentId", "")
+    if source == "main":
+        return f"{agent_id} · 主会话"
+    if source in {"telegram", "qqbot", "feishu", "whatsapp", "discord", "slack"}:
+        target = parts[-1] if len(parts) >= 5 else ""
+        target_label = target[:18] + "..." if len(target) > 18 else target
+        kind_label = "群组" if "group" in parts else "私聊"
+        return f"{CONVERSATION_SOURCE_LABELS.get(source, source)} · {kind_label} {target_label}".strip()
+    if source == "cron":
+        return f"{agent_id} · 定时任务"
+    if source == "subagent":
+        return f"{agent_id} · 子代理会话"
+    return session_key or agent_id or "未命名会话"
+
+
+def session_transcript_path(openclaw_dir, agent_id, session_id):
+    if not agent_id or not session_id:
+        return None
+    path = Path(openclaw_dir) / "agents" / agent_id / "sessions" / f"{session_id}.jsonl"
+    return path if path.exists() else None
+
+
+def extract_text_from_content(content):
+    texts = []
+    for item in content or []:
+        if not isinstance(item, dict):
+            continue
+        if item.get("type") == "text" and item.get("text"):
+            texts.append(str(item.get("text")))
+    return "\n\n".join(part.strip() for part in texts if part and str(part).strip()).strip()
+
+
+def summarize_json(value, max_chars=180):
+    try:
+        rendered = json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+    except Exception:
+        rendered = str(value)
+    rendered = rendered.strip()
+    if len(rendered) <= max_chars:
+        return rendered
+    return rendered[: max_chars - 1].rstrip() + "…"
+
+
+def parse_transcript_items(transcript_path, limit=120):
+    if not transcript_path or not Path(transcript_path).exists():
+        return {
+            "items": [],
+            "preview": "",
+            "meta": {"model": "", "provider": "", "thinkingLevel": ""},
+            "stats": {"turns": 0, "userMessages": 0, "assistantMessages": 0, "toolMessages": 0},
+        }
+
+    items = []
+    preview = ""
+    meta = {"model": "", "provider": "", "thinkingLevel": ""}
+    user_messages = 0
+    assistant_messages = 0
+    tool_messages = 0
+    lines = Path(transcript_path).read_text(encoding="utf-8", errors="replace").splitlines()
+    for raw in lines:
+        line = raw.strip()
+        if not line:
+            continue
+        try:
+            entry = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        entry_type = entry.get("type")
+        if entry_type == "model_change":
+            meta["model"] = entry.get("modelId", "") or meta["model"]
+            meta["provider"] = entry.get("provider", "") or meta["provider"]
+            continue
+        if entry_type == "thinking_level_change":
+            meta["thinkingLevel"] = entry.get("thinkingLevel", "") or meta["thinkingLevel"]
+            continue
+        if entry_type != "message":
+            continue
+
+        payload = entry.get("message", {}) if isinstance(entry.get("message"), dict) else {}
+        role = payload.get("role", "")
+        timestamp = entry.get("timestamp") or payload.get("timestamp") or ""
+        content = payload.get("content", []) if isinstance(payload.get("content"), list) else []
+
+        if role in {"user", "assistant"}:
+            text = extract_text_from_content(content)
+            if text:
+                items.append(
+                    {
+                        "id": entry.get("id", ""),
+                        "kind": role,
+                        "title": "用户" if role == "user" else "Agent",
+                        "text": text,
+                        "at": timestamp,
+                    }
+                )
+                preview = text
+                if role == "user":
+                    user_messages += 1
+                else:
+                    assistant_messages += 1
+            for part in content:
+                if not isinstance(part, dict) or part.get("type") != "toolCall":
+                    continue
+                tool_messages += 1
+                items.append(
+                    {
+                        "id": part.get("id", entry.get("id", "")),
+                        "kind": "tool_call",
+                        "title": f"调用工具 · {part.get('name', 'unknown')}",
+                        "text": summarize_json(part.get("arguments", {})),
+                        "at": timestamp,
+                    }
+                )
+            continue
+
+        if role == "toolResult":
+            tool_messages += 1
+            text = extract_text_from_content(content) or summarize_json(payload.get("details", {}))
+            items.append(
+                {
+                    "id": entry.get("id", ""),
+                    "kind": "tool_result",
+                    "title": f"工具结果 · {payload.get('toolName', 'unknown')}",
+                    "text": text or "工具没有返回可展示文本。",
+                    "at": timestamp,
+                    "error": bool(payload.get("isError")),
+                }
+            )
+            if text:
+                preview = text
+
+    if limit and len(items) > limit:
+        items = items[-limit:]
+    return {
+        "items": items,
+        "preview": preview,
+        "meta": meta,
+        "stats": {
+            "turns": user_messages + assistant_messages,
+            "userMessages": user_messages,
+            "assistantMessages": assistant_messages,
+            "toolMessages": tool_messages,
+        },
+    }
+
+
+def load_conversation_catalog(openclaw_dir, config, agent_labels, limit=36):
+    openclaw_dir = Path(openclaw_dir).expanduser().resolve()
+
+    def build():
+        env = openclaw_command_env(openclaw_dir)
+        result = run_command(["openclaw", "sessions", "--all-agents", "--json"], env=env)
+        payload = parse_json_payload(result.stdout, result.stderr, default=None)
+        if payload is None:
+            return {
+                "supported": False,
+                "error": (result.stderr or result.stdout or "读取会话目录失败。").strip(),
+                "summary": {"total": 0, "talkable": 0, "active24h": 0},
+                "sessions": [],
+                "commands": [],
+            }
+
+        now = now_utc()
+        items = []
+        for session in payload.get("sessions", []) or []:
+            updated_at = epoch_ms_to_iso(session.get("updatedAt"))
+            updated_dt = parse_iso(updated_at)
+            source = conversation_source_from_key(session.get("key"))
+            transcript_path = session_transcript_path(openclaw_dir, session.get("agentId", ""), session.get("sessionId", ""))
+            transcript_preview = parse_transcript_items(transcript_path, limit=18)
+            items.append(
+                {
+                    "key": session.get("key", ""),
+                    "agentId": session.get("agentId", ""),
+                    "agentLabel": agent_labels.get(session.get("agentId", ""), session.get("agentId", "")),
+                    "sessionId": session.get("sessionId", ""),
+                    "kind": session.get("kind", "direct"),
+                    "source": source,
+                    "sourceLabel": CONVERSATION_SOURCE_LABELS.get(source, source),
+                    "talkable": source not in READ_ONLY_CONVERSATION_SOURCES,
+                    "label": conversation_label(session),
+                    "updatedAt": updated_at,
+                    "updatedAgo": format_age(updated_dt, now),
+                    "model": session.get("model", ""),
+                    "provider": session.get("modelProvider") or session.get("providerOverride") or "",
+                    "contextTokens": session.get("contextTokens"),
+                    "totalTokens": session.get("totalTokens"),
+                    "abortedLastRun": bool(session.get("abortedLastRun")),
+                    "preview": transcript_preview.get("preview", "") or "暂时还没有可展示的文本消息。",
+                    "transcriptPath": str(transcript_path) if transcript_path else "",
+                }
+            )
+
+        items.sort(
+            key=lambda item: parse_iso(item.get("updatedAt")) or datetime.fromtimestamp(0, tz=timezone.utc),
+            reverse=True,
+        )
+        active24h = sum(
+            1
+            for item in items
+            if (parse_iso(item.get("updatedAt")) or datetime.fromtimestamp(0, tz=timezone.utc)) >= now - timedelta(hours=24)
+        )
+        talkable = sum(1 for item in items if item.get("talkable"))
+        return {
+            "supported": True,
+            "error": "",
+            "summary": {
+                "total": len(items),
+                "talkable": talkable,
+                "active24h": active24h,
+            },
+            "sessions": items[:limit],
+            "commands": [
+                {
+                    "label": "列出全部会话",
+                    "command": f'OPENCLAW_STATE_DIR="{openclaw_dir}" OPENCLAW_CONFIG_PATH="{openclaw_dir / "openclaw.json"}" openclaw sessions --all-agents --json',
+                    "description": "查看当前安装目录里的真实 OpenClaw 会话索引。",
+                },
+                {
+                    "label": "与路由 Agent 对话",
+                    "command": f'OPENCLAW_STATE_DIR="{openclaw_dir}" OPENCLAW_CONFIG_PATH="{openclaw_dir / "openclaw.json"}" openclaw agent --agent {get_router_agent_id(config)} --message "你好" --json',
+                    "description": "从终端直接向当前路由 Agent 发起一轮真实对话。",
+                },
+            ],
+        }
+
+    return cached_payload(("conversation-catalog", str(openclaw_dir)), 10, build)
+
+
+def load_conversation_transcript(openclaw_dir, agent_id, session_id):
+    path = session_transcript_path(openclaw_dir, agent_id, session_id)
+    transcript = parse_transcript_items(path, limit=140)
+    return {
+        "agentId": agent_id,
+        "sessionId": session_id,
+        "path": str(path) if path else "",
+        "items": transcript.get("items", []),
+        "stats": transcript.get("stats", {}),
+        "meta": transcript.get("meta", {}),
+    }
+
+
+def find_conversation_session(conversations, agent_id, session_id):
+    for session in conversations.get("sessions", []) or []:
+        if session.get("agentId") == agent_id and session.get("sessionId") == session_id:
+            return session
+    return None
 
 
 def load_kanban_config(openclaw_dir, router_agent_id):
@@ -4847,6 +5677,7 @@ def build_dashboard_data(openclaw_dir):
         },
     ]
     admin_data = build_admin_data(openclaw_dir, config, now, include_sensitive=False)
+    conversation_data = load_conversation_catalog(openclaw_dir, config, agent_labels)
     skills_data = load_skills_catalog(openclaw_dir, config=config)
     openclaw_data = load_openclaw_control_data(openclaw_dir)
     native_skill_names = set(openclaw_data.pop("_nativeSkillNames", []))
@@ -4884,6 +5715,7 @@ def build_dashboard_data(openclaw_dir):
         "relays": relays,
         "commands": product_commands,
         "admin": admin_data,
+        "conversations": conversation_data,
         "skills": skills_data,
         "openclaw": openclaw_data,
         "metrics": {
@@ -5002,6 +5834,7 @@ def permissions_for_role(role):
     return {
         "read": "read" in role_meta(role)["permissions"],
         "taskWrite": "task_write" in role_meta(role)["permissions"],
+        "conversationWrite": "conversation_write" in role_meta(role)["permissions"],
         "themeWrite": "theme_write" in role_meta(role)["permissions"],
         "adminWrite": "admin_write" in role_meta(role)["permissions"],
         "auditView": "audit_view" in role_meta(role)["permissions"],
@@ -5441,6 +6274,28 @@ def perform_task_done(openclaw_dir, task_id, output_path="", summary=""):
     result, output = run_python_script(kanban_script, args)
     if result.returncode != 0:
         raise RuntimeError(output or "任务完成写回失败。")
+
+
+def perform_conversation_send(openclaw_dir, agent_id, message, session_id="", thinking="low"):
+    if not agent_id:
+        raise RuntimeError("请先选择一个 Agent。")
+    text = str(message or "").strip()
+    if not text:
+        raise RuntimeError("消息不能为空。")
+    env = openclaw_command_env(openclaw_dir)
+    args = ["openclaw", "agent", "--agent", agent_id, "--message", text, "--json", "--timeout", "120"]
+    if session_id:
+        args.extend(["--session-id", session_id])
+    if thinking:
+        args.extend(["--thinking", thinking])
+    result = run_command(args, env=env)
+    payload = parse_json_payload(result.stdout, result.stderr, default=None)
+    if result.returncode != 0 or payload is None:
+        raise RuntimeError((result.stderr or result.stdout or "会话发送失败。").strip())
+    status = str(payload.get("status", "")).lower()
+    if status not in {"ok", "completed", "success"} and payload.get("ok") is False:
+        raise RuntimeError(summarize_json(payload))
+    return payload
 
 
 def perform_theme_switch(openclaw_dir, theme_name):
@@ -6313,6 +7168,44 @@ class CollaborationDashboardHandler(BaseHTTPRequestHandler):
                 )
                 return
 
+            if path == "/api/actions/conversations/send":
+                if not self._require_capability("conversationWrite", "当前账号没有发起或继续对话的权限。"):
+                    return
+                agent_id = str(payload.get("agentId", "")).strip()
+                session_id = str(payload.get("sessionId", "")).strip()
+                message = str(payload.get("message", "")).strip()
+                thinking = str(payload.get("thinking", "")).strip() or "low"
+                result = perform_conversation_send(
+                    self.server.openclaw_dir,
+                    agent_id=agent_id,
+                    session_id=session_id,
+                    message=message,
+                    thinking=thinking,
+                )
+                self._audit(
+                    "conversation_send",
+                    detail=f"向 {agent_id} 发起对话",
+                    meta={"agentId": agent_id, "sessionId": session_id or "main"},
+                )
+                data, _paths = self._refreshed_bundle()
+                meta = ((result.get("result", {}) or {}).get("meta", {}) or {}).get("agentMeta", {}) or {}
+                actual_agent_id = meta.get("agentId") or agent_id
+                actual_session_id = meta.get("sessionId") or session_id
+                conversation = load_conversation_transcript(self.server.openclaw_dir, actual_agent_id, actual_session_id)
+                session = find_conversation_session(data.get("conversations", {}) or {}, actual_agent_id, actual_session_id)
+                payloads = (result.get("result", {}) or {}).get("payloads", []) or []
+                reply_preview = payloads[0].get("text", "") if payloads and isinstance(payloads[0], dict) else ""
+                self._send_json(
+                    {
+                        "ok": True,
+                        "message": reply_preview[:160] if reply_preview else f"已向 {actual_agent_id} 成功发送消息。",
+                        "dashboard": data,
+                        "conversation": conversation,
+                        "session": session or {"agentId": actual_agent_id, "sessionId": actual_session_id},
+                    }
+                )
+                return
+
             if path == "/api/actions/theme/switch":
                 if not self._require_capability("themeWrite", "只有 Owner 可以切换主题。"):
                     return
@@ -6488,7 +7381,7 @@ class CollaborationDashboardHandler(BaseHTTPRequestHandler):
             return
         if not self._require_auth(api=path.startswith("/api/") or path == "/events"):
             return
-        if path in ("/", "/overview", "/agents", "/tasks", "/activity", "/themes", "/skills", "/openclaw", "/admin", "/collaboration-dashboard.html"):
+        if path in ("/", "/overview", "/agents", "/tasks", "/conversations", "/activity", "/themes", "/skills", "/openclaw", "/admin", "/collaboration-dashboard.html"):
             data, _paths = self._bundle()
             self._send_bytes(render_html(data).encode("utf-8"), "text/html; charset=utf-8")
             return
@@ -6506,6 +7399,20 @@ class CollaborationDashboardHandler(BaseHTTPRequestHandler):
             data, _paths = self._bundle()
             body = (json.dumps({"tasks": data.get("taskIndex", [])}, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
             self._send_bytes(body, "application/json; charset=utf-8")
+            return
+        if path == "/api/conversations":
+            data, _paths = self._bundle()
+            body = (json.dumps({"conversations": data.get("conversations", {})}, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+            self._send_bytes(body, "application/json; charset=utf-8")
+            return
+        if path == "/api/conversations/transcript":
+            agent_id = str(self._query().get("agentId", [""])[0] or "").strip()
+            session_id = str(self._query().get("sessionId", [""])[0] or "").strip()
+            if not agent_id or not session_id:
+                self._send_json({"ok": False, "error": "missing_params", "message": "需要 agentId 和 sessionId。"}, status=400)
+                return
+            conversation = load_conversation_transcript(self.server.openclaw_dir, agent_id, session_id)
+            self._send_json({"ok": True, "conversation": conversation})
             return
         if path == "/api/events":
             data, _paths = self._bundle()

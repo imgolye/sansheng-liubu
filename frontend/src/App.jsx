@@ -22,6 +22,7 @@ import {
   ReloadOutlined,
   SettingOutlined,
   TeamOutlined,
+  ThunderboltOutlined,
   UnorderedListOutlined,
 } from "@ant-design/icons";
 import { ApiError, getConversationTranscript, getDashboard, getSession, loginWithPassword, loginWithToken, logout, postAction } from "./api";

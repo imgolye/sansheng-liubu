@@ -4,20 +4,32 @@
 
 一键部署 11 个协作 AI Agent，模拟组织架构处理复杂任务。
 
-## 1.8.0 亮点
+## 1.11.0 亮点
 
-现在不只是一个“实时大屏”，而是一套本地可用的多 Agent 产品：
+现在不只是一个“本地操作台”，而是开始具备商业后台、Skills Center，以及 OpenClaw 原生控制中心能力的多 Agent 产品：
 
 ```bash
 python3 ~/.openclaw/workspace-your-router-id/scripts/collaboration_dashboard.py --serve
 ```
 
 这一版新增：
+- OpenClaw Control Center：新增 `/openclaw`，直接查看官方版本、schema 校验、gateway 健康、managed skills 目录和原生 skills 可用性
+- OpenClaw 原生 API 映射：新增 `/api/openclaw`，给产品内和外部自动化直接读 OpenClaw 运行态
+- Skills Center：新增 `/skills`，直接管理本地 skill 目录、校验质量、生成脚手架和打包 zip
+- Claude 风格 skill 工具链：内置 `bin/skill_utils.py`，支持 `list / validate / scaffold / package`
+- skill 分发能力：可把本地 skill 打成 zip，或直接发布到当前 OpenClaw 的 managed skills 目录
+- 示例 skill：仓库内置 `mission-control-release-ops`，直接演示 Anthropic 推荐的 frontmatter + references 渐进披露模式
+- OpenClaw 适配基线：按 `OpenClaw 2026.3.12+` 适配，并兼容 CLI 在 JSON 前后夹带 warning / plugin 日志的场景
+- 团队账号登录：日常使用改走账号密码，`Owner Token` 只保留给初始化和紧急接管
+- 角色权限体系：`Owner / Operator / Viewer` 三层权限，收口任务、主题和后台动作
+- 商业后台：新增 `/admin`，可管理团队席位、角色状态、密码重置和审计日志
+- 席位治理：支持激活 / 停用账号，且会阻止你把最后一个活跃 Owner 锁死
+- 后台敏感数据分层：静态快照只保留聚合统计，具体成员名单和审计流只对已登录授权会话开放
 - 多模块 Mission Control：总览、Agent 运营、交付执行、活动时间线、主题中心
 - 本地实时 Web 应用：`--serve` 会启动带 SSE 推送的常驻产品面板
-- 本地登录：先访问 `/login`，通过 cookie 会话进入受保护的产品界面
-- 深链接路由：`/agents`、`/tasks`、`/activity`、`/themes`
-- 本地 API：`/api/agents`、`/api/tasks`、`/api/events`、`/api/themes`、`/api/deliverables`
+- 本地登录：先访问 `/login`，通过签名 cookie 会话进入受保护的产品界面
+- 深链接路由：`/agents`、`/tasks`、`/activity`、`/themes`、`/skills`、`/openclaw`、`/admin`
+- 本地 API：`/api/agents`、`/api/tasks`、`/api/events`、`/api/themes`、`/api/skills`、`/api/openclaw`、`/api/deliverables`、`/api/admin`
 - 可调布局：支持收起菜单，并在运营 / 聚焦 / 紧凑三种布局间切换
 - 操作工作台：直接在产品里创建任务，不再先回终端
 - 任务操作抽屉：可在任务详情里追加进展、标记阻塞、标记完成
@@ -161,7 +173,7 @@ http://127.0.0.1:18890/collaboration-dashboard.html
 http://127.0.0.1:18890/login
 ```
 
-登录默认使用 `DASHBOARD_AUTH_TOKEN`；如果未设置，会自动回落到现有的 `GATEWAY_AUTH_TOKEN`。
+首次进入时可以使用 `DASHBOARD_AUTH_TOKEN`；如果未设置，会自动回落到现有的 `GATEWAY_AUTH_TOKEN`。创建团队席位后，建议改走团队账号登录。
 
 如果通过本地服务访问，现在还可以直接打开这些模块：
 
@@ -171,6 +183,8 @@ http://127.0.0.1:18890/agents
 http://127.0.0.1:18890/tasks
 http://127.0.0.1:18890/activity
 http://127.0.0.1:18890/themes
+http://127.0.0.1:18890/skills
+http://127.0.0.1:18890/admin
 ```
 
 现在还能直接点开：
@@ -179,6 +193,8 @@ http://127.0.0.1:18890/themes
 - 任务卡片：查看任务路线、TODO 进度、完整协同回放，并直接推进 / 阻塞 / 完成
 - 时间线事件：从最近一次 handoff / progress 直接跳到对应任务
 - 主题卡片：直接在产品中切换主题
+- Skills Center：扫描 skill 目录、查看 frontmatter/结构质量、直接创建脚手架并打包 zip
+- 商业后台：创建席位、调整角色、停用账号、重置密码，并查看治理审计
 
 生成结果默认在：
 
@@ -232,6 +248,42 @@ bash bin/switch_theme.sh --theme corporate --dir /path/to/.openclaw
 bash bin/switch_theme.sh --theme corporate --task-prefix TASK
 ```
 
+## Skills Center
+
+如果你要把 Anthropic Skills 那套能力落进这个仓库，现在可以直接在产品里打开：
+
+```text
+http://127.0.0.1:18890/skills
+```
+
+也可以直接走命令行：
+
+```bash
+python3 bin/skill_utils.py list --project-dir .
+python3 bin/skill_utils.py validate --project-dir .
+python3 bin/skill_utils.py package --project-dir . --skill mission-control-release-ops
+```
+
+如果你想新建一个 skill 脚手架：
+
+```bash
+python3 bin/skill_utils.py scaffold \
+  --project-dir . \
+  --slug customer-onboarding \
+  --title "Customer Onboarding" \
+  --description "Guides a repeatable customer onboarding workflow." \
+  --trigger-phrase "onboard a new customer" \
+  --category workflow-automation \
+  --include-scripts \
+  --include-references
+```
+
+当前仓库已经自带一个示例 skill：
+
+```text
+skills/mission-control-release-ops/
+```
+
 ## 核心特性
 
 - **任务分级 S/A/B**：重大任务走审议流程，简单任务直达执行
@@ -254,7 +306,13 @@ sansheng-liubu/
 │   ├── render_templates.py   # SOUL.md / kanban_config / HEARTBEAT 渲染
 │   ├── generate_config.py    # openclaw.json 生成
 │   ├── theme_utils.py        # 主题 schema 校验 / 迁移辅助
+│   ├── skill_utils.py        # Claude 风格 skill 的扫描 / 校验 / 脚手架 / 打包
 │   └── validate.sh           # 安装后验证
+├── skills/
+│   └── mission-control-release-ops/
+│       ├── SKILL.md          # 示例 skill
+│       └── references/
+│           └── release-checklist.md
 ├── templates/
 │   └── scripts/              # 运行时脚本（部署到每个 workspace）
 │       ├── kanban_update.py   # 看板任务管理（自动加载 kanban_config.json）

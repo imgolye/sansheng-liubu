@@ -4,13 +4,16 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import hashlib
 import hmac
 import json
 import os
+import secrets
 import subprocess
 import time
 from collections import Counter, defaultdict
+from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -19,7 +22,26 @@ from urllib.parse import parse_qs, quote, urlsplit
 
 
 TERMINAL_STATES = {"done", "cancelled", "canceled"}
-PRODUCT_VERSION = "1.8.0"
+PRODUCT_VERSION = "1.11.0"
+OPENCLAW_BASELINE_RELEASE = "2026.3.12"
+PASSWORD_HASH_ITERATIONS = 260000
+USER_ROLES = {
+    "owner": {
+        "label": "Owner",
+        "description": "管理产品、成员、主题和高风险动作。",
+        "permissions": {"read", "task_write", "theme_write", "admin_write", "audit_view"},
+    },
+    "operator": {
+        "label": "Operator",
+        "description": "负责推进任务、维护交付和处理运营现场。",
+        "permissions": {"read", "task_write", "audit_view"},
+    },
+    "viewer": {
+        "label": "Viewer",
+        "description": "只读查看现场、交付和协同动态。",
+        "permissions": {"read"},
+    },
+}
 THEME_STYLES = {
     "imperial": {
         "bg": "#efe4d6",
@@ -242,6 +264,23 @@ LOGIN_TEMPLATE = """<!doctype html>
       color: var(--muted);
       line-height: 1.7;
     }}
+    .auth-pills {{
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }}
+    .auth-pill {{
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,0.72);
+      padding: 8px 12px;
+      font-size: 0.84rem;
+      font-weight: 700;
+      color: var(--accentStrong);
+    }}
     form {{
       display: grid;
       gap: 14px;
@@ -252,7 +291,8 @@ LOGIN_TEMPLATE = """<!doctype html>
       font-size: 0.96rem;
       font-weight: 700;
     }}
-    input[type="password"] {{
+    input[type="password"],
+    input[type="text"] {{
       width: 100%;
       border-radius: 18px;
       border: 1px solid var(--line);
@@ -262,7 +302,8 @@ LOGIN_TEMPLATE = """<!doctype html>
       outline: none;
       font: inherit;
     }}
-    input[type="password"]:focus {{
+    input[type="password"]:focus,
+    input[type="text"]:focus {{
       border-color: color-mix(in srgb, var(--accent) 38%, var(--line));
       box-shadow: 0 0 0 4px rgba(203, 90, 30, 0.10);
     }}
@@ -290,6 +331,23 @@ LOGIN_TEMPLATE = """<!doctype html>
       gap: 10px;
       align-items: center;
     }}
+    .auth-divider {{
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      color: var(--muted);
+      font-size: 0.82rem;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      font-weight: 700;
+    }}
+    .auth-divider::before,
+    .auth-divider::after {{
+      content: "";
+      height: 1px;
+      flex: 1;
+      background: var(--line);
+    }}
     .error {{
       border-radius: 16px;
       border: 1px solid color-mix(in srgb, var(--danger) 28%, var(--line));
@@ -315,18 +373,18 @@ LOGIN_TEMPLATE = """<!doctype html>
       <div class="story-grid">
         <article class="story-card">
           <span>Product Surface</span>
-          <strong>总览、Agents、Tasks、Activity、Themes</strong>
-          <p>不再只是一个大屏，而是多模块本地产品。</p>
+          <strong>总览、运营、交付、审计、后台管理</strong>
+          <p>它开始具备商业后台应有的账号、权限、审计和操作闭环。</p>
         </article>
         <article class="story-card">
           <span>Secure Local Access</span>
-          <strong>使用本地控制令牌进入</strong>
-          <p>默认使用 `DASHBOARD_AUTH_TOKEN`，未设置时回落到 `GATEWAY_AUTH_TOKEN`。</p>
+          <strong>团队账号优先，Owner Token 兜底</strong>
+          <p>日常使用团队席位登录；Owner Token 只保留给初始化和紧急接管。</p>
         </article>
         <article class="story-card">
-          <span>Live Control</span>
-          <strong>实时事件流 + 本地 API</strong>
-          <p>登录后可访问 `/api/agents`、`/api/tasks`、`/events` 等接口。</p>
+          <span>Commercial Readiness</span>
+          <strong>角色权限、审计日志、后台治理</strong>
+          <p>所有高风险动作都会留下审计线索，成员权限也开始按角色收口。</p>
         </article>
         <article class="story-card">
           <span>Current Context</span>
@@ -340,25 +398,50 @@ LOGIN_TEMPLATE = """<!doctype html>
       <div class="auth-top">
         <div class="eyebrow">Local Sign-In</div>
         <h2>进入 Mission Control</h2>
-        <p>输入本地控制令牌后，即可进入受保护的产品界面。</p>
+        <p>优先使用团队账号登录。Owner Token 仍保留作初始化和紧急接管入口。</p>
+      </div>
+
+      <div class="auth-pills">
+        <span class="auth-pill">{team_status}</span>
+        <span class="auth-pill">{auth_mode}</span>
       </div>
 
       <div class="error {error_hidden}">{error_message}</div>
 
       <form method="post" action="/login">
         <input type="hidden" name="next" value="{next_path}">
+        <input type="hidden" name="mode" value="password">
         <label>
-          控制令牌
-          <input type="password" name="token" autocomplete="current-password" placeholder="输入本地 dashboard token">
+          用户名
+          <input type="text" name="username" autocomplete="username" placeholder="例如 owner / alice@company">
+        </label>
+        <label>
+          密码
+          <input type="password" name="password" autocomplete="current-password" placeholder="输入团队账号密码">
         </label>
         <div class="auth-actions">
-          <button class="button" type="submit">登录进入</button>
+          <button class="button" type="submit">团队登录</button>
           <a class="button secondary" href="https://github.com/imgolye/sansheng-liubu/releases/latest">查看版本说明</a>
         </div>
       </form>
 
-      <p class="auth-help">如果你希望单独管理登录令牌，可在 `{openclaw_dir}/.env` 中设置 `DASHBOARD_AUTH_TOKEN`。否则会默认使用现有 `GATEWAY_AUTH_TOKEN`。</p>
+      <div class="auth-divider">Owner Fallback</div>
+
+      <form method="post" action="/login">
+        <input type="hidden" name="next" value="{next_path}">
+        <input type="hidden" name="mode" value="token">
+        <label>
+          Owner Token
+          <input type="password" name="token" autocomplete="current-password" placeholder="输入本地 dashboard token">
+        </label>
+        <div class="auth-actions">
+          <button class="button secondary" type="submit">使用 Token 进入</button>
+        </div>
+      </form>
+
+      <p class="auth-help">{bootstrap_help}</p>
       <p class="auth-meta">登录后会创建本地会话 cookie，仅用于当前 Mission Control 页面与 API 访问。</p>
+      <p class="auth-meta">如需单独管理兜底令牌，可在 `{openclaw_dir}/.env` 中设置 `DASHBOARD_AUTH_TOKEN`；未设置时默认回落到 `GATEWAY_AUTH_TOKEN`。</p>
     </section>
   </div>
 </body>
@@ -1554,6 +1637,9 @@ __STYLE_VARS__
           <button class="nav-link" data-view="tasks">交付执行<span>任务河道、筛选、已完成交付物</span></button>
           <button class="nav-link" data-view="activity">活动时间线<span>handoff 与 progress 的完整动态</span></button>
           <button class="nav-link" data-view="themes">主题中心<span>当前组织主题与产品运行命令</span></button>
+          <button class="nav-link" data-view="skills">Skills Center<span>技能目录、校验、脚手架与打包</span></button>
+          <button class="nav-link" data-view="openclaw">OpenClaw<span>官方运行态、skills、schema 与 gateway 适配</span></button>
+          <button class="nav-link" data-view="admin">商业后台<span>账号席位、角色权限与审计留痕</span></button>
         </div>
       </section>
 
@@ -1581,7 +1667,7 @@ __STYLE_VARS__
           <div class="topbar-subtitle" id="view-subtitle">本地多 Agent 应用，不再只是单页监控。</div>
         </div>
         <div class="search-shell">
-          <input class="search-input" id="global-search" type="search" placeholder="搜索 Agent、任务、事件、交付物">
+          <input class="search-input" id="global-search" type="search" placeholder="搜索 Agent、任务、事件、交付物、skills">
         </div>
         <div class="topbar-tools">
           <button class="button secondary small" id="toggle-rail">菜单</button>
@@ -1789,6 +1875,174 @@ __STYLE_VARS__
             <div class="command-list" id="theme-command-list"></div>
           </section>
         </section>
+
+        <section class="view" data-view="skills" hidden>
+          <div class="split-grid">
+            <section class="panel">
+              <div class="panel-head">
+                <div>
+                  <h2 class="panel-title">技能总览</h2>
+                  <p class="panel-subtitle">把 Anthropic Skills 指南里的结构、触发、校验和打包能力落到本地产品里。</p>
+                </div>
+              </div>
+              <div class="deliverable-list" id="skills-summary-list"></div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-head">
+                <div>
+                  <h2 class="panel-title">指南映射</h2>
+                  <p class="panel-subtitle">这些卡片对应的是你给我的 PDF 里最关键的能力：渐进披露、触发质量和分发准备度。</p>
+                </div>
+              </div>
+              <div class="deliverable-list" id="skills-guidance-list"></div>
+            </section>
+          </div>
+
+          <div class="split-grid">
+            <section class="panel">
+              <div class="panel-head">
+                <div>
+                  <h2 class="panel-title">技能目录</h2>
+                  <p class="panel-subtitle">扫描本仓库的 `skills/` 目录，检查 frontmatter、结构质量、示例和打包状态。</p>
+                </div>
+              </div>
+              <div class="deliverable-list" id="skills-catalog-list"></div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-head">
+                <div>
+                  <h2 class="panel-title">技能工作台</h2>
+                  <p class="panel-subtitle">Owner 可以直接在产品里建 skill 脚手架并打包 zip，准备上传到 Claude.ai 或放进 Claude Code。</p>
+                </div>
+              </div>
+              <div class="studio-grid" id="skills-studio"></div>
+            </section>
+          </div>
+
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <h2 class="panel-title">技能命令</h2>
+                <p class="panel-subtitle">直接复制底层命令，既能走产品，也能回到终端做自动化。</p>
+              </div>
+            </div>
+            <div class="command-list" id="skills-command-list"></div>
+          </section>
+        </section>
+
+        <section class="view" data-view="openclaw" hidden>
+          <div class="split-grid">
+            <section class="panel">
+              <div class="panel-head">
+                <div>
+                  <h2 class="panel-title">OpenClaw 运行态</h2>
+                  <p class="panel-subtitle">把官方 CLI、Gateway、schema、skills 和 onboarding 适配面统一放到一个产品视图里。</p>
+                </div>
+              </div>
+              <div class="deliverable-list" id="openclaw-summary-list"></div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-head">
+                <div>
+                  <h2 class="panel-title">兼容性判断</h2>
+                  <p class="panel-subtitle">快速判断当前仓库和 OpenClaw 运行面的耦合状态，避免只在 README 里说“兼容”。</p>
+                </div>
+              </div>
+              <div class="deliverable-list" id="openclaw-compat-list"></div>
+            </section>
+          </div>
+
+          <div class="split-grid">
+            <section class="panel">
+              <div class="panel-head">
+                <div>
+                  <h2 class="panel-title">Channels 与 Gateway</h2>
+                  <p class="panel-subtitle">直接看官方 Gateway health 返回的 channel 与 agent 运行信息。</p>
+                </div>
+              </div>
+              <div class="deliverable-list" id="openclaw-channels-list"></div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-head">
+                <div>
+                  <h2 class="panel-title">原生 Skills 生态</h2>
+                  <p class="panel-subtitle">同时看 OpenClaw 当前识别到的原生 skills，以及哪些本仓库 skill 已经发布进运行时。</p>
+                </div>
+              </div>
+              <div class="deliverable-list" id="openclaw-native-skills-list"></div>
+            </section>
+          </div>
+
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <h2 class="panel-title">OpenClaw 命令</h2>
+                <p class="panel-subtitle">直接复制官方命令，进入 dashboard、doctor、gateway health、skills list 和 onboard。</p>
+              </div>
+            </div>
+            <div class="command-list" id="openclaw-command-list"></div>
+          </section>
+        </section>
+
+        <section class="view" data-view="admin" hidden>
+          <div class="split-grid">
+            <section class="panel">
+              <div class="panel-head">
+                <div>
+                  <h2 class="panel-title">商业后台总览</h2>
+                  <p class="panel-subtitle">把席位、权限、产品目录和操作治理放到一个更像商业后台的入口里。</p>
+                </div>
+              </div>
+              <div class="deliverable-list" id="admin-summary-list"></div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-head">
+                <div>
+                  <h2 class="panel-title">角色矩阵</h2>
+                  <p class="panel-subtitle">清楚知道 Owner、Operator、Viewer 各自能做什么，避免共享 token 带来的权限扩散。</p>
+                </div>
+              </div>
+              <div class="deliverable-list" id="admin-role-list"></div>
+            </section>
+          </div>
+
+          <div class="split-grid">
+            <section class="panel">
+              <div class="panel-head">
+                <div>
+                  <h2 class="panel-title">团队席位</h2>
+                  <p class="panel-subtitle">现在开始按人管理访问，而不是继续靠单一兜底 token。</p>
+                </div>
+              </div>
+              <div class="deliverable-list" id="admin-user-list"></div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-head">
+                <div>
+                  <h2 class="panel-title">新增成员</h2>
+                  <p class="panel-subtitle">Owner 可以在这里直接补齐 operator / viewer / owner 席位。</p>
+                </div>
+              </div>
+              <div class="studio-grid" id="admin-user-studio"></div>
+            </section>
+          </div>
+
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <h2 class="panel-title">操作审计</h2>
+                <p class="panel-subtitle">登录、任务推进、主题切换和成员管理都会沉淀到这里，开始具备商业后台应有的治理能力。</p>
+              </div>
+            </div>
+            <div class="event-feed" id="admin-audit-feed"></div>
+          </section>
+        </section>
       </main>
     </div>
   </div>
@@ -1833,6 +2087,18 @@ __STYLE_VARS__
         title: "主题中心",
         subtitle: "把组织主题、运行命令和当前上下文放进一个统一入口。",
       },
+      skills: {
+        title: "Skills Center",
+        subtitle: "用产品方式管理 Claude 风格技能的目录、质量、脚手架与分发准备度。",
+      },
+      openclaw: {
+        title: "OpenClaw Center",
+        subtitle: "把官方运行态、schema、skills 和 gateway 适配收口到一个产品视图里。",
+      },
+      admin: {
+        title: "商业后台",
+        subtitle: "开始按账号、角色、审计和治理能力来运营这套多 Agent 产品。",
+      },
     };
 
     const refs = {
@@ -1865,6 +2131,21 @@ __STYLE_VARS__
       currentThemeSummary: document.getElementById("current-theme-summary"),
       themeGrid: document.getElementById("theme-grid"),
       themeCommandList: document.getElementById("theme-command-list"),
+      skillsSummaryList: document.getElementById("skills-summary-list"),
+      skillsGuidanceList: document.getElementById("skills-guidance-list"),
+      skillsCatalogList: document.getElementById("skills-catalog-list"),
+      skillsStudio: document.getElementById("skills-studio"),
+      skillsCommandList: document.getElementById("skills-command-list"),
+      openclawSummaryList: document.getElementById("openclaw-summary-list"),
+      openclawCompatList: document.getElementById("openclaw-compat-list"),
+      openclawChannelsList: document.getElementById("openclaw-channels-list"),
+      openclawNativeSkillsList: document.getElementById("openclaw-native-skills-list"),
+      openclawCommandList: document.getElementById("openclaw-command-list"),
+      adminSummaryList: document.getElementById("admin-summary-list"),
+      adminRoleList: document.getElementById("admin-role-list"),
+      adminUserList: document.getElementById("admin-user-list"),
+      adminUserStudio: document.getElementById("admin-user-studio"),
+      adminAuditFeed: document.getElementById("admin-audit-feed"),
       railThemeName: document.getElementById("rail-theme-name"),
       railOwnerTitle: document.getElementById("rail-owner-title"),
       railRouterAgent: document.getElementById("rail-router-agent"),
@@ -1945,6 +2226,9 @@ __STYLE_VARS__
         "/tasks": "tasks",
         "/activity": "activity",
         "/themes": "themes",
+        "/skills": "skills",
+        "/openclaw": "openclaw",
+        "/admin": "admin",
       };
       return mapping[location.pathname.replace(/\/+$/, "") || "/"] || "overview";
     }
@@ -2072,6 +2356,12 @@ __STYLE_VARS__
       return (state.deliverables || []).filter((item) => matchesQuery(`${item.id} ${item.title} ${item.summary} ${item.output}`));
     }
 
+    function filteredSkills() {
+      return ((state.skills || {}).skills || []).filter((skill) =>
+        matchesQuery(`${skill.displayName} ${skill.slug} ${skill.description} ${skill.categoryLabel} ${skill.relativePath}`),
+      );
+    }
+
     function copyText(text) {
       if (navigator.clipboard && window.isSecureContext) {
         return navigator.clipboard.writeText(text);
@@ -2111,6 +2401,14 @@ __STYLE_VARS__
 
     function supportsThemeSwitch() {
       return supportsActions() && Boolean(runtimeCaps().themeSwitchAvailable);
+    }
+
+    function currentUser() {
+      return runtimeCaps().currentUser || { displayName: "Guest", roleLabel: "Viewer", role: "viewer" };
+    }
+
+    function hasPermission(permissionKey) {
+      return Boolean((runtimeCaps().permissions || {})[permissionKey]);
     }
 
     function showToast(message, tone = "success", title = "") {
@@ -2188,6 +2486,24 @@ __STYLE_VARS__
       input.placeholder = placeholder;
       input.value = value;
       return input;
+    }
+
+    function makeSelect(options = [], value = "") {
+      const select = document.createElement("select");
+      select.className = "text-input";
+      options.forEach((option) => {
+        const item = document.createElement("option");
+        if (typeof option === "string") {
+          item.value = option;
+          item.textContent = option;
+        } else {
+          item.value = option.value;
+          item.textContent = option.label;
+        }
+        select.append(item);
+      });
+      select.value = value;
+      return select;
     }
 
     function makeTextarea(placeholder = "", value = "", rows = 4) {
@@ -2480,7 +2796,7 @@ __STYLE_VARS__
         refs.taskActionStudio.append(createCard);
       } else {
         const form = el("form", "studio-form");
-        const titleInput = makeTextarea("例如：整理 1.8.0 发布后的客户答疑 FAQ", "", 3);
+        const titleInput = makeTextarea("例如：整理 1.10.0 发布后的客户答疑 FAQ", "", 3);
         const briefInput = makeTextarea("给协同链路补充一句背景、目标或优先级说明", "", 4);
         const submit = el("button", "button", "创建并进入任务");
         submit.type = "submit";
@@ -2654,6 +2970,297 @@ __STYLE_VARS__
       });
     }
 
+    function renderAdminView() {
+      const admin = state.admin || {};
+      const users = admin.users || [];
+      const hasSeatVisibility = hasPermission("auditView") || hasPermission("adminWrite");
+      const userOptions = users.map((user) => ({
+        value: user.username,
+        label: `${user.displayName} · ${user.username}`,
+      }));
+      clearNode(refs.adminSummaryList);
+      clearNode(refs.adminRoleList);
+      clearNode(refs.adminUserList);
+      clearNode(refs.adminUserStudio);
+      clearNode(refs.adminAuditFeed);
+
+      const summaries = [
+        {
+          title: "团队席位",
+          body: `${(admin.seatSummary || {}).total || 0} 个账号已经纳入产品权限体系。`,
+          meta: `Owner ${(admin.seatSummary || {}).owner || 0} · Operator ${(admin.seatSummary || {}).operator || 0} · Viewer ${(admin.seatSummary || {}).viewer || 0}`,
+        },
+        {
+          title: "治理动作",
+          body: `最近 24 小时记录了 ${(admin.seatSummary || {}).actions24h || 0} 条治理动作。`,
+          meta: `失败登录 ${(admin.seatSummary || {}).failedLogins24h || 0} 次`,
+        },
+        {
+          title: "席位状态",
+          body: `激活 ${(admin.seatSummary || {}).active || 0} 个 · 停用 ${(admin.seatSummary || {}).suspended || 0} 个`,
+          meta: hasSeatVisibility ? "Owner 可以直接在这里调整角色、停用席位和重置密码。" : "当前账号只看到聚合统计，不暴露具体席位名单。",
+        },
+        {
+          title: "源仓库目录",
+          body: (admin.workspace || {}).projectDir || "当前安装未记录仓库目录。",
+          meta: "主题切换和运行时脚本会使用这个源目录。",
+        },
+      ];
+      summaries.forEach((item) => {
+        const card = el("div", "deliverable-card");
+        card.append(el("div", "deliverable-title", item.title));
+        card.append(el("div", "command-desc", item.body));
+        card.append(el("div", "path-line", item.meta));
+        refs.adminSummaryList.append(card);
+      });
+
+      (admin.roleMatrix || []).forEach((role) => {
+        const card = el("div", "deliverable-card");
+        card.append(el("div", "deliverable-title", `${role.label} · ${role.role}`));
+        card.append(el("div", "command-desc", role.description));
+        const chips = el("div", "drawer-chip-row");
+        [
+          ["读数据", role.permissions.read],
+          ["任务动作", role.permissions.taskWrite],
+          ["主题切换", role.permissions.themeWrite],
+          ["成员管理", role.permissions.adminWrite],
+          ["审计查看", role.permissions.auditView],
+        ].forEach(([label, enabled]) => {
+          chips.append(el("span", "drawer-chip", `${label} · ${enabled ? "允许" : "禁止"}`));
+        });
+        card.append(chips);
+        refs.adminRoleList.append(card);
+      });
+      if (!(admin.roleMatrix || []).length) {
+        refs.adminRoleList.append(el("div", "empty", "当前还没有角色矩阵数据。"));
+      }
+
+      if (!users.length) {
+        const message = admin.hasUsers && !hasSeatVisibility
+          ? "团队席位已经启用，但当前账号没有查看具体名单的权限。"
+          : "还没有团队账号。建议先用 Owner Token 进入，然后创建首个 owner / operator / viewer 席位。";
+        refs.adminUserList.append(el("div", "empty", message));
+      } else {
+        users.forEach((user) => {
+          const card = el("div", "deliverable-card");
+          const head = el("div", "deliverable-head");
+          const left = el("div");
+          left.append(el("div", "deliverable-title", user.displayName));
+          left.append(el("div", "list-meta", `${user.username} · ${user.roleLabel}`));
+          head.append(left);
+          head.append(el("div", "theme-badge", user.status || "active"));
+          card.append(head);
+          card.append(el("div", "command-desc", user.roleDescription || "团队成员"));
+          card.append(el("div", "path-line", `创建于 ${formatClock(user.createdAt)} · 最近登录 ${user.lastLoginAt ? formatClock(user.lastLoginAt) : "还没有"}`));
+          refs.adminUserList.append(card);
+        });
+      }
+
+      if (!hasPermission("adminWrite")) {
+        refs.adminUserStudio.append(el("div", "empty", "只有 Owner 可以在这里创建和管理团队席位。"));
+      } else {
+        const createCard = el("section", "studio-card");
+        createCard.append(el("div", "studio-eyebrow", "Seat Provisioning"));
+        createCard.append(el("div", "deliverable-title", "新增团队成员"));
+        createCard.append(el("div", "studio-copy", "商业后台开始按席位和角色运转。这里创建的账号可以直接用用户名和密码登录。"));
+
+        const form = el("form", "studio-form");
+        const nameInput = makeInput("例如：Alice Zhang", "", "text");
+        const userInput = makeInput("例如：alice 或 alice@company", "", "text");
+        const roleInput = makeSelect([
+          { value: "owner", label: "Owner" },
+          { value: "operator", label: "Operator" },
+          { value: "viewer", label: "Viewer" },
+        ], "operator");
+        const passwordInput = makeInput("至少 8 位密码", "", "password");
+        const submit = el("button", "button", "创建席位");
+        submit.type = "submit";
+        const inline = el("div", "status-inline", "创建后会立刻写入团队账号库，并留下审计记录。");
+        form.append(makeField("显示名称", nameInput, "用于顶部身份显示和审计日志。"));
+        form.append(makeField("登录名", userInput, "建议用稳定的用户名或邮箱。"));
+        form.append(makeField("角色", roleInput, "建议把日常运营同学放在 Operator，把只读看板同学放在 Viewer。"));
+        form.append(makeField("初始密码", passwordInput, "建议后续再通过管理流程重置。"));
+        const footer = el("div", "action-footer");
+        footer.append(submit);
+        footer.append(inline);
+        form.append(footer);
+
+        form.addEventListener("submit", async (event) => {
+          event.preventDefault();
+          const payload = {
+            displayName: nameInput.value.trim(),
+            username: userInput.value.trim(),
+            role: roleInput.value.trim().toLowerCase(),
+            password: passwordInput.value.trim(),
+          };
+          if (!payload.username || !payload.role || !payload.password) {
+            inline.textContent = "登录名、角色和密码都不能为空。";
+            showToast("登录名、角色和密码都不能为空。", "warn");
+            return;
+          }
+          setButtonBusy(submit, true, "创建中...");
+          inline.textContent = "正在创建团队席位。";
+          try {
+            const data = await postActionJson("/api/actions/admin/user/create", payload);
+            inline.textContent = data.message || "团队成员已创建。";
+            showToast(data.message || "团队成员已创建。", "success");
+            nameInput.value = "";
+            userInput.value = "";
+            roleInput.value = "operator";
+            passwordInput.value = "";
+          } catch (error) {
+            inline.textContent = error.message;
+            showToast(error.message, "error");
+          } finally {
+            setButtonBusy(submit, false);
+          }
+        });
+
+        createCard.append(form);
+        refs.adminUserStudio.append(createCard);
+
+        const accessCard = el("section", "studio-card");
+        accessCard.append(el("div", "studio-eyebrow", "Seat Governance"));
+        accessCard.append(el("div", "deliverable-title", "调整角色与席位状态"));
+        accessCard.append(el("div", "studio-copy", "这里可以直接升降权限、停用席位，也会自动阻止你把最后一个活跃 Owner 锁死。"));
+
+        if (!userOptions.length) {
+          accessCard.append(el("div", "empty", "先创建至少一个团队账号，才能继续做治理动作。"));
+        } else {
+          const accessForm = el("form", "studio-form");
+          const accountInput = makeSelect(userOptions, userOptions[0].value);
+          const accessRoleInput = makeSelect([
+            { value: "owner", label: "Owner" },
+            { value: "operator", label: "Operator" },
+            { value: "viewer", label: "Viewer" },
+          ], users[0].role || "operator");
+          const statusInput = makeSelect([
+            { value: "active", label: "激活" },
+            { value: "suspended", label: "停用" },
+          ], users[0].status || "active");
+          const accessSubmit = el("button", "button", "应用席位变更");
+          accessSubmit.type = "submit";
+          const accessInline = el("div", "status-inline", "角色和账号状态会一起更新，并留下审计记录。");
+
+          const syncAccessFields = () => {
+            const selected = users.find((user) => user.username === accountInput.value);
+            if (!selected) return;
+            accessRoleInput.value = selected.role || "viewer";
+            statusInput.value = selected.status || "active";
+          };
+          accountInput.addEventListener("change", syncAccessFields);
+          syncAccessFields();
+
+          accessForm.append(makeField("团队账号", accountInput, "建议优先管理真人席位，不要频繁复用共享账号。"));
+          accessForm.append(makeField("角色", accessRoleInput, "Owner 具备完整治理权限，Operator 负责日常运行，Viewer 只读。"));
+          accessForm.append(makeField("账号状态", statusInput, "停用后，该账号无法继续登录 Mission Control。"));
+          const accessFooter = el("div", "action-footer");
+          accessFooter.append(accessSubmit);
+          accessFooter.append(accessInline);
+          accessForm.append(accessFooter);
+
+          accessForm.addEventListener("submit", async (event) => {
+            event.preventDefault();
+            setButtonBusy(accessSubmit, true, "应用中...");
+            accessInline.textContent = "正在更新席位治理配置。";
+            try {
+              const data = await postActionJson("/api/actions/admin/user/update_access", {
+                username: accountInput.value,
+                role: accessRoleInput.value,
+                status: statusInput.value,
+              });
+              accessInline.textContent = data.message || "席位配置已更新。";
+              showToast(data.message || "席位配置已更新。", "success");
+            } catch (error) {
+              accessInline.textContent = error.message;
+              showToast(error.message, "error");
+            } finally {
+              setButtonBusy(accessSubmit, false);
+            }
+          });
+
+          accessCard.append(accessForm);
+        }
+        refs.adminUserStudio.append(accessCard);
+
+        const resetCard = el("section", "studio-card");
+        resetCard.append(el("div", "studio-eyebrow", "Credential Care"));
+        resetCard.append(el("div", "deliverable-title", "重置团队账号密码"));
+        resetCard.append(el("div", "studio-copy", "当席位需要交接或密码泄露时，可以在这里快速重置，并让审计链路留下完整记录。"));
+
+        if (!userOptions.length) {
+          resetCard.append(el("div", "empty", "当前还没有可重置密码的团队账号。"));
+        } else {
+          const resetForm = el("form", "studio-form");
+          const resetAccountInput = makeSelect(userOptions, userOptions[0].value);
+          const resetPasswordInput = makeInput("新的密码，至少 8 位", "", "password");
+          const resetSubmit = el("button", "button", "重置密码");
+          resetSubmit.type = "submit";
+          const resetInline = el("div", "status-inline", "密码会重新哈希后写入账号库，不会以明文保存在仓库里。");
+
+          resetForm.append(makeField("团队账号", resetAccountInput, "请选择要重置密码的席位。"));
+          resetForm.append(makeField("新密码", resetPasswordInput, "建议用临时强密码，后续再通过企业流程换成个人密码。"));
+          const resetFooter = el("div", "action-footer");
+          resetFooter.append(resetSubmit);
+          resetFooter.append(resetInline);
+          resetForm.append(resetFooter);
+
+          resetForm.addEventListener("submit", async (event) => {
+            event.preventDefault();
+            if (!resetPasswordInput.value.trim()) {
+              resetInline.textContent = "请先输入新的密码。";
+              showToast("请先输入新的密码。", "warn");
+              return;
+            }
+            setButtonBusy(resetSubmit, true, "重置中...");
+            resetInline.textContent = "正在重置密码。";
+            try {
+              const data = await postActionJson("/api/actions/admin/user/reset_password", {
+                username: resetAccountInput.value,
+                password: resetPasswordInput.value.trim(),
+              });
+              resetPasswordInput.value = "";
+              resetInline.textContent = data.message || "密码已重置。";
+              showToast(data.message || "密码已重置。", "success");
+            } catch (error) {
+              resetInline.textContent = error.message;
+              showToast(error.message, "error");
+            } finally {
+              setButtonBusy(resetSubmit, false);
+            }
+          });
+
+          resetCard.append(resetForm);
+        }
+        refs.adminUserStudio.append(resetCard);
+      }
+
+      if (!hasPermission("auditView")) {
+        refs.adminAuditFeed.append(el("div", "empty", "当前账号没有查看审计日志的权限。"));
+      } else if (!(admin.auditEvents || []).length) {
+        refs.adminAuditFeed.append(el("div", "empty", "当前还没有审计记录。下一次登录、任务操作或主题切换后会开始沉淀。"));
+      } else {
+        (admin.auditEvents || []).forEach((event) => {
+          const card = el("article", `event event-${event.outcome === "success" ? "progress" : "flow"}`);
+          const head = el("div", "event-head");
+          const title = el("div");
+          title.append(el("div", "event-title", `${event.actor} · ${event.action}`));
+          title.append(el("div", "event-detail", `${event.role || "unknown"} · ${event.atAgo}`));
+          head.append(title);
+          head.append(el("div", "event-meta", event.outcome));
+          card.append(head);
+          card.append(el("div", "event-detail", event.headline || "没有额外说明。"));
+          const metaText = Object.entries(event.detail || {})
+            .map(([key, value]) => `${key}: ${value}`)
+            .join(" · ");
+          if (metaText) {
+            card.append(el("div", "event-detail", metaText));
+          }
+          refs.adminAuditFeed.append(card);
+        });
+      }
+    }
+
     function renderStatusStrip() {
       clearNode(refs.agentStatusStrip);
       const counts = { active: 0, waiting: 0, blocked: 0, standby: 0, idle: 0 };
@@ -2704,7 +3311,12 @@ __STYLE_VARS__
       refs.railRouterAgent.textContent = state.routerAgentId || "未知";
       refs.railInstallDir.textContent = state.openclawDir;
       refs.jsonLink.href = dashboardJsonHref();
-      refs.authStatus.textContent = supportsHttp ? (supportsActions() ? "本地会话 · 可操作" : "本地会话 · 只读") : "快照模式";
+      if (supportsHttp) {
+        const user = currentUser();
+        refs.authStatus.textContent = `${user.displayName} · ${user.roleLabel || user.role || "Viewer"}`;
+      } else {
+        refs.authStatus.textContent = "快照模式";
+      }
       renderCommandCards(refs.railCommandList, (state.commands || []).slice(0, 2), "暂无快速动作。");
     }
 
@@ -3096,6 +3708,395 @@ __STYLE_VARS__
       renderCommandCards(refs.themeCommandList, state.commands || [], "当前没有主题相关命令。");
     }
 
+    function renderSkillsView() {
+      const skills = state.skills || {};
+      clearNode(refs.skillsSummaryList);
+      clearNode(refs.skillsGuidanceList);
+      clearNode(refs.skillsCatalogList);
+      clearNode(refs.skillsStudio);
+      clearNode(refs.skillsCommandList);
+
+      if (!skills.supported) {
+        const message = skills.error || "当前环境还没有关联到可用的 skill 工具。";
+        refs.skillsSummaryList.append(el("div", "empty", message));
+        refs.skillsCatalogList.append(el("div", "empty", "Skills Center 已启用，但当前安装还不能扫描本地 skill 目录。"));
+        refs.skillsStudio.append(el("div", "empty", "等安装关联到仓库目录后，这里就可以直接创建和打包技能。"));
+        renderCommandCards(refs.skillsCommandList, [], "当前没有可用的技能命令。");
+        return;
+      }
+
+      const summary = skills.summary || {};
+      const roots = skills.roots || [];
+      [
+        {
+          title: "技能目录",
+          body: `当前共发现 ${summary.total || 0} 个本地技能。`,
+          meta: `Ready ${summary.ready || 0} · Warning ${summary.warning || 0} · Error ${summary.error || 0}`,
+        },
+        {
+          title: "分发准备度",
+          body: `已打包 ${(summary.packaged || 0)} 个 zip，可直接进入上传或分享流程。`,
+          meta: "支持按 Anthropic Skills 指南做 zip 分发。",
+        },
+        {
+          title: "OpenClaw 发布态",
+          body: `已有 ${(summary.publishedToOpenClaw || 0)} 个本地 skill 发布进当前 OpenClaw managed skills 目录。`,
+          meta: "发布后可被 `openclaw skills list` 和原生运行时直接识别。",
+        },
+        {
+          title: "扫描范围",
+          body: roots.map((item) => item.path).join(" · ") || "当前没有扫描根目录。",
+          meta: "项目 skills/ 目录会作为默认技能源。",
+        },
+      ].forEach((item) => {
+        const card = el("div", "deliverable-card");
+        card.append(el("div", "deliverable-title", item.title));
+        card.append(el("div", "command-desc", item.body));
+        card.append(el("div", "path-line", item.meta));
+        refs.skillsSummaryList.append(card);
+      });
+
+      (skills.guidance || []).forEach((item) => {
+        const card = el("div", "deliverable-card");
+        card.append(el("div", "deliverable-title", item.title));
+        card.append(el("div", "command-desc", item.summary));
+        refs.skillsGuidanceList.append(card);
+      });
+      if (!(skills.guidance || []).length) {
+        refs.skillsGuidanceList.append(el("div", "empty", "当前还没有技能指南映射。"));
+      }
+
+      const visibleSkills = filteredSkills();
+      if (!(skills.skills || []).length) {
+        refs.skillsCatalogList.append(el("div", "empty", "当前还没有本地技能。你可以直接在右侧工作台里新建一个。"));
+      } else if (!visibleSkills.length) {
+        refs.skillsCatalogList.append(el("div", "empty", "当前没有匹配搜索条件的技能。"));
+      } else {
+        visibleSkills.forEach((skill) => {
+          const card = el("div", "deliverable-card");
+          const head = el("div", "deliverable-head");
+          const left = el("div");
+          left.append(el("div", "deliverable-title", skill.displayName || skill.name));
+          left.append(el("div", "list-meta", `${skill.slug} · ${skill.categoryLabel} · ${skill.rootKind || "project"}`));
+          head.append(left);
+          head.append(el("div", "theme-badge", skill.status || "ready"));
+          card.append(head);
+          card.append(el("div", "command-desc", skill.description || "当前还没有技能描述。"));
+          card.append(el("div", "path-line", skill.relativePath || skill.path || "未知路径"));
+
+          const chips = el("div", "drawer-chip-row");
+          [
+            `质量分 ${skill.qualityScore || 0}`,
+            `字数 ${skill.wordCount || 0}`,
+            skill.hasScripts ? "带 scripts/" : "无 scripts/",
+            skill.hasReferences ? "带 references/" : "无 references/",
+            skill.package && skill.package.exists ? "已打包" : "未打包",
+            skill.publishedToOpenClaw ? "已发布到 OpenClaw" : "未发布到 OpenClaw",
+          ].forEach((label) => chips.append(el("span", "drawer-chip", label)));
+          card.append(chips);
+
+          if ((skill.notes || []).length) {
+            card.append(el("div", "path-line", (skill.notes || []).join(" · ")));
+          }
+          if ((skill.issues || []).length) {
+            (skill.issues || []).slice(0, 3).forEach((issue) => {
+              card.append(el("div", "event-detail", `${issue.kind === "error" ? "错误" : "提醒"}：${issue.message}`));
+            });
+          }
+
+          const actions = el("div", "panel-actions");
+          if (skill.package && skill.package.exists) {
+            actions.append(makeCopyButton(skill.package.path, "复制 zip 路径"));
+          }
+          if (hasPermission("adminWrite")) {
+            const publishButton = el("button", "button secondary", skill.publishedToOpenClaw ? "重新发布" : "发布到 OpenClaw");
+            publishButton.type = "button";
+            publishButton.addEventListener("click", async () => {
+              setButtonBusy(publishButton, true, "发布中...");
+              try {
+                const data = await postActionJson("/api/actions/skills/publish", { slug: skill.slug });
+                showToast(data.message || `技能 ${skill.slug} 已发布到 OpenClaw。`, "success");
+              } catch (error) {
+                showToast(error.message, "error");
+              } finally {
+                setButtonBusy(publishButton, false);
+              }
+            });
+            actions.append(publishButton);
+
+            const packButton = el("button", "button secondary", skill.package && skill.package.exists ? "重新打包" : "打包技能");
+            packButton.type = "button";
+            packButton.addEventListener("click", async () => {
+              setButtonBusy(packButton, true, "打包中...");
+              try {
+                const data = await postActionJson("/api/actions/skills/package", { slug: skill.slug });
+                showToast(data.message || `技能 ${skill.slug} 已打包。`, "success");
+              } catch (error) {
+                showToast(error.message, "error");
+              } finally {
+                setButtonBusy(packButton, false);
+              }
+            });
+            actions.append(packButton);
+          }
+          card.append(actions);
+          refs.skillsCatalogList.append(card);
+        });
+      }
+
+      if (!hasPermission("adminWrite")) {
+        refs.skillsStudio.append(el("div", "empty", "只有 Owner 可以在产品里新建和打包技能。"));
+      } else {
+        const scaffoldCard = el("section", "studio-card");
+        scaffoldCard.append(el("div", "studio-eyebrow", "Skill Scaffold"));
+        scaffoldCard.append(el("div", "deliverable-title", "创建一个新 skill"));
+        scaffoldCard.append(el("div", "studio-copy", "直接生成 Anthropic 风格的 skill 目录、frontmatter 和说明骨架，方便后续继续打磨。"));
+
+        const scaffoldForm = el("form", "studio-form");
+        const slugInput = makeInput("例如：linear-sprint-review", "", "text");
+        const titleInput = makeInput("例如：Linear Sprint Review", "", "text");
+        const descriptionInput = makeTextarea("写清这个 skill 做什么，再让它在 frontmatter 里补上触发句。", "", 4);
+        const triggerInput = makeInput("例如：review the sprint, summarize sprint health", "", "text");
+        const categoryInput = makeSelect([
+          { value: "document-asset-creation", label: "Document & Asset Creation" },
+          { value: "workflow-automation", label: "Workflow Automation" },
+          { value: "mcp-enhancement", label: "MCP Enhancement" },
+        ], "workflow-automation");
+        const mcpServerInput = makeInput("可选：Linear / Notion / custom-mcp", "", "text");
+        const includeScripts = makeCheckbox("生成 scripts/ 占位目录", true);
+        const includeReferences = makeCheckbox("生成 references/ 占位目录", true);
+        const includeAssets = makeCheckbox("生成 assets/ 占位目录", false);
+        const scaffoldSubmit = el("button", "button", "创建 skill");
+        scaffoldSubmit.type = "submit";
+        const scaffoldStatus = el("div", "status-inline", "生成后会立即重新扫描技能目录，并显示校验结果。");
+
+        scaffoldForm.append(makeField("skill slug", slugInput, "必须是 kebab-case，例如 `my-skill-name`。"));
+        scaffoldForm.append(makeField("显示标题", titleInput, "用于 SKILL.md 的主标题。"));
+        scaffoldForm.append(makeField("能力描述", descriptionInput, "写 what，触发句会和下方 trigger phrase 一起组成 frontmatter description。"));
+        scaffoldForm.append(makeField("触发短语", triggerInput, "尽量写成用户真的会说的话。"));
+        scaffoldForm.append(makeField("类别", categoryInput, "按 Anthropic Guide 的三大类来归档。"));
+        scaffoldForm.append(makeField("MCP Server", mcpServerInput, "可选。适合 MCP Enhancement 场景。"));
+        scaffoldForm.append(includeScripts.wrap);
+        scaffoldForm.append(includeReferences.wrap);
+        scaffoldForm.append(includeAssets.wrap);
+        const scaffoldFooter = el("div", "action-footer");
+        scaffoldFooter.append(scaffoldSubmit);
+        scaffoldFooter.append(scaffoldStatus);
+        scaffoldForm.append(scaffoldFooter);
+
+        scaffoldForm.addEventListener("submit", async (event) => {
+          event.preventDefault();
+          const payload = {
+            slug: slugInput.value.trim(),
+            title: titleInput.value.trim(),
+            description: descriptionInput.value.trim(),
+            triggerPhrase: triggerInput.value.trim(),
+            category: categoryInput.value,
+            includeScripts: includeScripts.input.checked,
+            includeReferences: includeReferences.input.checked,
+            includeAssets: includeAssets.input.checked,
+            mcpServer: mcpServerInput.value.trim(),
+          };
+          if (!payload.slug || !payload.title || !payload.description) {
+            scaffoldStatus.textContent = "slug、标题和描述不能为空。";
+            showToast("slug、标题和描述不能为空。", "warn");
+            return;
+          }
+          setButtonBusy(scaffoldSubmit, true, "创建中...");
+          scaffoldStatus.textContent = "正在生成新的 skill。";
+          try {
+            const data = await postActionJson("/api/actions/skills/scaffold", payload);
+            scaffoldStatus.textContent = data.message || "skill 已创建。";
+            showToast(data.message || "skill 已创建。", "success");
+            slugInput.value = "";
+            titleInput.value = "";
+            descriptionInput.value = "";
+            triggerInput.value = "";
+            mcpServerInput.value = "";
+            includeScripts.input.checked = true;
+            includeReferences.input.checked = true;
+            includeAssets.input.checked = false;
+          } catch (error) {
+            scaffoldStatus.textContent = error.message;
+            showToast(error.message, "error");
+          } finally {
+            setButtonBusy(scaffoldSubmit, false);
+          }
+        });
+
+        scaffoldCard.append(scaffoldForm);
+        refs.skillsStudio.append(scaffoldCard);
+
+        const packageCard = el("section", "studio-card");
+        packageCard.append(el("div", "studio-eyebrow", "Distribution"));
+        packageCard.append(el("div", "deliverable-title", "打包 skill zip"));
+        packageCard.append(el("div", "studio-copy", "把 skill 打成 zip，方便上传到 Claude.ai 或进入你自己的分发流程。"));
+        if (!(skills.skills || []).length) {
+          packageCard.append(el("div", "empty", "先创建至少一个 skill，才能继续打包。"));
+        } else {
+          const packageForm = el("form", "studio-form");
+          const skillSelect = makeSelect(
+            (skills.skills || []).map((skill) => ({ value: skill.slug, label: `${skill.displayName} · ${skill.slug}` })),
+            (skills.skills || [])[0].slug,
+          );
+          const packageSubmit = el("button", "button", "打包 zip");
+          packageSubmit.type = "submit";
+          const packageStatus = el("div", "status-inline", "zip 会输出到 `dist/skills/`，便于分享和上传。");
+          packageForm.append(makeField("选择 skill", skillSelect, "打包时会保留顶层 skill 文件夹。"));
+          const packageFooter = el("div", "action-footer");
+          packageFooter.append(packageSubmit);
+          packageFooter.append(packageStatus);
+          packageForm.append(packageFooter);
+          packageForm.addEventListener("submit", async (event) => {
+            event.preventDefault();
+            setButtonBusy(packageSubmit, true, "打包中...");
+            packageStatus.textContent = "正在打包 skill zip。";
+            try {
+              const data = await postActionJson("/api/actions/skills/package", { slug: skillSelect.value });
+              packageStatus.textContent = data.message || "skill 已打包。";
+              showToast(data.message || "skill 已打包。", "success");
+            } catch (error) {
+              packageStatus.textContent = error.message;
+              showToast(error.message, "error");
+            } finally {
+              setButtonBusy(packageSubmit, false);
+            }
+          });
+          packageCard.append(packageForm);
+        }
+        refs.skillsStudio.append(packageCard);
+      }
+
+      renderCommandCards(refs.skillsCommandList, skills.commands || [], "当前没有可用的技能命令。");
+    }
+
+    function renderOpenClawView() {
+      const data = state.openclaw || {};
+      clearNode(refs.openclawSummaryList);
+      clearNode(refs.openclawCompatList);
+      clearNode(refs.openclawChannelsList);
+      clearNode(refs.openclawNativeSkillsList);
+      clearNode(refs.openclawCommandList);
+
+      if (!data.supported) {
+        const message = data.error || "当前环境无法读取 OpenClaw 运行态。";
+        refs.openclawSummaryList.append(el("div", "empty", message));
+        refs.openclawCompatList.append(el("div", "empty", "OpenClaw 控制面暂时不可用。"));
+        refs.openclawChannelsList.append(el("div", "empty", "没有可展示的 channel / gateway 数据。"));
+        refs.openclawNativeSkillsList.append(el("div", "empty", "没有可展示的原生 skill 数据。"));
+        renderCommandCards(refs.openclawCommandList, data.commands || [], "当前没有可用的 OpenClaw 命令。");
+        return;
+      }
+
+      [
+        {
+          title: "OpenClaw 版本",
+          body: (data.version || {}).raw || "unknown",
+          meta: `release ${(data.version || {}).release || "unknown"} · build ${(data.version || {}).build || "unknown"}`,
+        },
+        {
+          title: "配置校验",
+          body: (data.config || {}).valid ? "当前配置已通过 schema 校验。" : "当前配置没有通过 schema 校验。",
+          meta: (data.config || {}).path || "未知配置路径",
+        },
+        {
+          title: "Gateway 健康",
+          body: (data.gateway || {}).ok ? "Gateway 正常返回 health JSON。" : "Gateway 当前没有返回健康状态。",
+          meta: `agent ${(data.gateway || {}).agentCount || 0} · default ${(data.gateway || {}).defaultAgentId || "unknown"} · ${((data.gateway || {}).durationMs || 0)}ms`,
+        },
+        {
+          title: "原生 Skills",
+          body: `OpenClaw 当前识别 ${(data.nativeSkills || {}).total || 0} 个原生 skills，其中 ${(data.nativeSkills || {}).eligible || 0} 个可直接使用。`,
+          meta: `bundled ${(data.nativeSkills || {}).bundled || 0} · external ${(data.nativeSkills || {}).external || 0} · repo published ${((state.skills || {}).summary || {}).publishedToOpenClaw || 0}`,
+        },
+      ].forEach((item) => {
+        const card = el("div", "deliverable-card");
+        card.append(el("div", "deliverable-title", item.title));
+        card.append(el("div", "command-desc", item.body));
+        card.append(el("div", "path-line", item.meta));
+        refs.openclawSummaryList.append(card);
+      });
+
+      (data.compatibility || []).forEach((item) => {
+        const card = el("div", "deliverable-card");
+        const head = el("div", "deliverable-head");
+        const left = el("div");
+        left.append(el("div", "deliverable-title", item.title));
+        left.append(el("div", "command-desc", item.body));
+        head.append(left);
+        head.append(el("div", "theme-badge", item.status || "ready"));
+        card.append(head);
+        if (item.meta) {
+          card.append(el("div", "path-line", item.meta));
+        }
+        refs.openclawCompatList.append(card);
+      });
+      if (!(data.compatibility || []).length) {
+        refs.openclawCompatList.append(el("div", "empty", "当前还没有 OpenClaw 兼容性判断结果。"));
+      }
+
+      if (!((data.gateway || {}).channels || []).length) {
+        refs.openclawChannelsList.append(el("div", "empty", "当前还没有 channel 健康数据。"));
+      } else {
+        ((data.gateway || {}).channels || []).forEach((channel) => {
+          const card = el("div", "deliverable-card");
+          const head = el("div", "deliverable-head");
+          const left = el("div");
+          left.append(el("div", "deliverable-title", channel.title));
+          left.append(el("div", "list-meta", channel.meta || "unknown"));
+          head.append(left);
+          head.append(el("div", "theme-badge", channel.healthy ? "healthy" : "warning"));
+          card.append(head);
+          card.append(el("div", "command-desc", channel.detail || "无额外信息"));
+          card.append(el("div", "path-line", channel.running ? "运行中" : "未运行"));
+          refs.openclawChannelsList.append(card);
+        });
+      }
+
+      const nativeSkills = data.nativeSkills || {};
+      const skillSummaryCard = el("div", "deliverable-card");
+      skillSummaryCard.append(el("div", "deliverable-title", "原生 Skills 摘要"));
+      skillSummaryCard.append(el("div", "command-desc", `Eligible ${nativeSkills.eligible || 0} · Disabled ${nativeSkills.disabled || 0} · Blocked ${nativeSkills.blocked || 0}`));
+      skillSummaryCard.append(el("div", "path-line", nativeSkills.managedSkillsDir || "当前没有返回 managed skills 目录。"));
+      skillSummaryCard.append(el("div", "path-line", `Top missing bins: ${(nativeSkills.missingBins || []).map((item) => `${item.name}(${item.count})`).join(" · ") || "none"}`));
+      refs.openclawNativeSkillsList.append(skillSummaryCard);
+
+      (nativeSkills.sampleEligible || []).slice(0, 4).forEach((item) => {
+        const card = el("div", "deliverable-card");
+        card.append(el("div", "deliverable-title", `可用 · ${item.title}`));
+        card.append(el("div", "list-meta", item.meta || ""));
+        card.append(el("div", "command-desc", item.detail || ""));
+        refs.openclawNativeSkillsList.append(card);
+      });
+      (nativeSkills.sampleMissing || []).slice(0, 4).forEach((item) => {
+        const card = el("div", "deliverable-card");
+        card.append(el("div", "deliverable-title", `待补齐 · ${item.title}`));
+        card.append(el("div", "list-meta", item.meta || ""));
+        card.append(el("div", "command-desc", item.detail || ""));
+        refs.openclawNativeSkillsList.append(card);
+      });
+      (nativeSkills.warnings || []).slice(0, 3).forEach((warning) => {
+        const card = el("div", "deliverable-card");
+        card.append(el("div", "deliverable-title", "运行时提醒"));
+        card.append(el("div", "command-desc", warning));
+        refs.openclawNativeSkillsList.append(card);
+      });
+
+      renderCommandCards(refs.openclawCommandList, data.commands || [], "当前没有可用的 OpenClaw 命令。");
+    }
+
+    function renderAdminSurface() {
+      renderAdminView();
+    }
+
+    function renderSkillsSurface() {
+      renderSkillsView();
+    }
+
+    function renderOpenClawSurface() {
+      renderOpenClawView();
+    }
+
     function renderAll() {
       renderMeta();
       applyViewState();
@@ -3104,6 +4105,9 @@ __STYLE_VARS__
       renderTasksView();
       renderActivityView();
       renderThemesView();
+      renderSkillsSurface();
+      renderOpenClawSurface();
+      renderAdminSurface();
       syncDrawer();
     }
 
@@ -3278,6 +4282,46 @@ def now_utc():
     return datetime.now(timezone.utc)
 
 
+def now_iso():
+    return now_utc().isoformat().replace("+00:00", "Z")
+
+
+PAYLOAD_CACHE = {}
+
+
+def cached_payload(cache_key, ttl_seconds, builder):
+    now = time.time()
+    cached = PAYLOAD_CACHE.get(cache_key)
+    if cached and now - cached["ts"] < ttl_seconds:
+        return deepcopy(cached["value"])
+    value = builder()
+    PAYLOAD_CACHE[cache_key] = {"ts": now, "value": deepcopy(value)}
+    return value
+
+
+def clear_cached_payloads():
+    PAYLOAD_CACHE.clear()
+
+
+def parse_openclaw_release(value):
+    if not value:
+        return None
+    parts = []
+    for item in str(value).split("."):
+        if not item.isdigit():
+            return None
+        parts.append(int(item))
+    return tuple(parts)
+
+
+def is_supported_openclaw_release(value):
+    parsed = parse_openclaw_release(value)
+    baseline = parse_openclaw_release(OPENCLAW_BASELINE_RELEASE)
+    if not parsed or not baseline:
+        return False
+    return parsed >= baseline
+
+
 def format_age(dt, now):
     if dt is None:
         return "无信号"
@@ -3298,6 +4342,29 @@ def load_json(path, default):
             return json.load(f)
     except Exception:
         return default
+
+
+def parse_json_payload(*candidates, default=None):
+    decoder = json.JSONDecoder()
+    for candidate in candidates:
+        if not candidate:
+            continue
+        text = str(candidate).strip()
+        if not text:
+            continue
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            pass
+        for index, char in enumerate(text):
+            if char not in "[{":
+                continue
+            try:
+                payload, _end = decoder.raw_decode(text[index:])
+                return payload
+            except json.JSONDecodeError:
+                continue
+    return deepcopy(default)
 
 
 def load_config(openclaw_dir):
@@ -3779,6 +4846,23 @@ def build_dashboard_data(openclaw_dir):
             "description": "生成最新 HTML 和 JSON 快照。",
         },
     ]
+    admin_data = build_admin_data(openclaw_dir, config, now, include_sensitive=False)
+    skills_data = load_skills_catalog(openclaw_dir, config=config)
+    openclaw_data = load_openclaw_control_data(openclaw_dir)
+    native_skill_names = set(openclaw_data.pop("_nativeSkillNames", []))
+    managed_skills_root = str((openclaw_data.get("nativeSkills", {}) or {}).get("managedSkillsDir", "") or "").strip()
+    managed_skills_dir = Path(managed_skills_root).expanduser() if managed_skills_root else None
+    published_count = 0
+    for skill in skills_data.get("skills", []):
+        managed_skill_path = managed_skills_dir / skill.get("slug", "") if managed_skills_dir else None
+        published = skill.get("slug") in native_skill_names or bool(
+            managed_skill_path and (managed_skill_path / "SKILL.md").exists()
+        )
+        skill["publishedToOpenClaw"] = published
+        if published:
+            published_count += 1
+    if isinstance(skills_data.get("summary"), dict):
+        skills_data["summary"]["publishedToOpenClaw"] = published_count
 
     return {
         "generatedAt": now.isoformat().replace("+00:00", "Z"),
@@ -3799,6 +4883,9 @@ def build_dashboard_data(openclaw_dir):
         "events": global_events[:42],
         "relays": relays,
         "commands": product_commands,
+        "admin": admin_data,
+        "skills": skills_data,
+        "openclaw": openclaw_data,
         "metrics": {
             "activeTasks": len(active_tasks),
             "activeAgents": active_agent_count,
@@ -3889,6 +4976,320 @@ def read_env_value(openclaw_dir, key):
     return ""
 
 
+def dashboard_dir(openclaw_dir):
+    path = Path(openclaw_dir) / "dashboard"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def users_store_path(openclaw_dir):
+    return dashboard_dir(openclaw_dir) / "product_users.json"
+
+
+def audit_log_path(openclaw_dir):
+    return dashboard_dir(openclaw_dir) / "audit-log.jsonl"
+
+
+def normalize_username(value):
+    return str(value or "").strip().lower()
+
+
+def role_meta(role):
+    return USER_ROLES.get(role, USER_ROLES["viewer"])
+
+
+def permissions_for_role(role):
+    return {
+        "read": "read" in role_meta(role)["permissions"],
+        "taskWrite": "task_write" in role_meta(role)["permissions"],
+        "themeWrite": "theme_write" in role_meta(role)["permissions"],
+        "adminWrite": "admin_write" in role_meta(role)["permissions"],
+        "auditView": "audit_view" in role_meta(role)["permissions"],
+    }
+
+
+def encode_base64url(raw):
+    return base64.urlsafe_b64encode(raw).decode("utf-8").rstrip("=")
+
+
+def decode_base64url(raw):
+    padding = "=" * (-len(raw) % 4)
+    return base64.urlsafe_b64decode(raw + padding)
+
+
+def hash_password(password, salt=None, iterations=PASSWORD_HASH_ITERATIONS):
+    if not password:
+        raise ValueError("password required")
+    salt_bytes = salt or secrets.token_bytes(16)
+    digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt_bytes, iterations)
+    return "pbkdf2_sha256${}${}${}".format(
+        iterations,
+        encode_base64url(salt_bytes),
+        encode_base64url(digest),
+    )
+
+
+def verify_password(password, encoded):
+    try:
+        algorithm, iterations_text, salt_text, digest_text = str(encoded).split("$", 3)
+        if algorithm != "pbkdf2_sha256":
+            return False
+        expected = hash_password(
+            password,
+            salt=decode_base64url(salt_text),
+            iterations=int(iterations_text),
+        )
+        return hmac.compare_digest(expected, encoded)
+    except Exception:
+        return False
+
+
+def load_product_users(openclaw_dir):
+    path = users_store_path(openclaw_dir)
+    data = load_json(path, {"users": []})
+    users = data.get("users", []) if isinstance(data, dict) else []
+    normalized = []
+    for user in users:
+        if not isinstance(user, dict):
+            continue
+        username = normalize_username(user.get("username"))
+        if not username:
+            continue
+        normalized.append(
+            {
+                "id": user.get("id") or secrets.token_hex(8),
+                "username": username,
+                "displayName": user.get("displayName") or username,
+                "role": user.get("role") if user.get("role") in USER_ROLES else "viewer",
+                "passwordHash": user.get("passwordHash", ""),
+                "status": user.get("status") if user.get("status") in {"active", "suspended"} else "active",
+                "createdAt": user.get("createdAt", ""),
+                "lastLoginAt": user.get("lastLoginAt", ""),
+            }
+        )
+    return normalized
+
+
+def save_product_users(openclaw_dir, users):
+    path = users_store_path(openclaw_dir)
+    payload = {
+        "updatedAt": now_iso(),
+        "users": users,
+    }
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def safe_user_record(user):
+    role = user.get("role", "viewer")
+    meta = role_meta(role)
+    return {
+        "id": user.get("id"),
+        "username": user.get("username"),
+        "displayName": user.get("displayName") or user.get("username"),
+        "role": role,
+        "roleLabel": meta["label"],
+        "roleDescription": meta["description"],
+        "status": user.get("status", "active"),
+        "createdAt": user.get("createdAt", ""),
+        "lastLoginAt": user.get("lastLoginAt", ""),
+    }
+
+
+def create_product_user(openclaw_dir, username, display_name, role, password):
+    username = normalize_username(username)
+    if not username:
+        raise RuntimeError("用户名不能为空。")
+    if role not in USER_ROLES:
+        raise RuntimeError(f"未知角色：{role}")
+    if len(password or "") < 8:
+        raise RuntimeError("密码至少需要 8 位。")
+    users = load_product_users(openclaw_dir)
+    if any(user["username"] == username for user in users):
+        raise RuntimeError(f"账号 {username} 已存在。")
+    user = {
+        "id": secrets.token_hex(8),
+        "username": username,
+        "displayName": (display_name or username).strip(),
+        "role": role,
+        "passwordHash": hash_password(password),
+        "status": "active",
+        "createdAt": now_iso(),
+        "lastLoginAt": "",
+    }
+    users.append(user)
+    save_product_users(openclaw_dir, users)
+    return safe_user_record(user)
+
+
+def find_product_user_entry(users, username):
+    normalized = normalize_username(username)
+    for index, user in enumerate(users):
+        if user["username"] == normalized:
+            return index, user
+    return -1, None
+
+
+def ensure_active_owner_guard(users, target_user, next_role=None, next_status=None):
+    if not target_user:
+        return
+    current_role = target_user.get("role", "viewer")
+    current_status = target_user.get("status", "active")
+    role_after = next_role or current_role
+    status_after = next_status or current_status
+    active_owners = [
+        user for user in users if user.get("role") == "owner" and user.get("status", "active") == "active"
+    ]
+    target_is_last_active_owner = (
+        current_role == "owner"
+        and current_status == "active"
+        and len(active_owners) <= 1
+    )
+    if target_is_last_active_owner and (role_after != "owner" or status_after != "active"):
+        raise RuntimeError("至少要保留一个激活状态的 Owner，不能把最后一个 Owner 降级或停用。")
+
+
+def update_product_user_access(openclaw_dir, username, role, status):
+    username = normalize_username(username)
+    if not username:
+        raise RuntimeError("请先选择一个团队账号。")
+    if role not in USER_ROLES:
+        raise RuntimeError(f"未知角色：{role}")
+    if status not in {"active", "suspended"}:
+        raise RuntimeError(f"未知账号状态：{status}")
+    users = load_product_users(openclaw_dir)
+    index, user = find_product_user_entry(users, username)
+    if not user:
+        raise RuntimeError(f"账号 {username} 不存在。")
+    ensure_active_owner_guard(users, user, next_role=role, next_status=status)
+    users[index]["role"] = role
+    users[index]["status"] = status
+    save_product_users(openclaw_dir, users)
+    return safe_user_record(users[index])
+
+
+def reset_product_user_password(openclaw_dir, username, password):
+    username = normalize_username(username)
+    if not username:
+        raise RuntimeError("请先选择一个团队账号。")
+    if len(password or "") < 8:
+        raise RuntimeError("重置后的密码至少需要 8 位。")
+    users = load_product_users(openclaw_dir)
+    index, user = find_product_user_entry(users, username)
+    if not user:
+        raise RuntimeError(f"账号 {username} 不存在。")
+    users[index]["passwordHash"] = hash_password(password)
+    save_product_users(openclaw_dir, users)
+    return safe_user_record(users[index])
+
+
+def update_product_user_login(openclaw_dir, username):
+    users = load_product_users(openclaw_dir)
+    updated = False
+    for user in users:
+        if user["username"] == normalize_username(username):
+            user["lastLoginAt"] = now_iso()
+            updated = True
+            break
+    if updated:
+        save_product_users(openclaw_dir, users)
+
+
+def append_audit_event(openclaw_dir, action, actor, outcome="success", detail="", meta=None):
+    path = audit_log_path(openclaw_dir)
+    entry = {
+        "id": secrets.token_hex(8),
+        "at": now_iso(),
+        "action": action,
+        "outcome": outcome,
+        "detail": detail,
+        "actor": actor or {"displayName": "system", "role": "owner", "kind": "system"},
+        "meta": meta or {},
+    }
+    with open(path, "a", encoding="utf-8") as f:
+        f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    return entry
+
+
+def load_audit_events(openclaw_dir, limit=80):
+    path = audit_log_path(openclaw_dir)
+    if not path.exists():
+        return []
+    events = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        try:
+            events.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+    events.sort(
+        key=lambda item: parse_iso(item.get("at")) or datetime.fromtimestamp(0, tz=timezone.utc),
+        reverse=True,
+    )
+    return events[:limit]
+
+
+def build_admin_data(openclaw_dir, config, now, include_sensitive=True):
+    users = [safe_user_record(user) for user in load_product_users(openclaw_dir)]
+    audit_events = load_audit_events(openclaw_dir, limit=60)
+    counts = Counter(user["role"] for user in users)
+    status_counts = Counter(user.get("status", "active") for user in users)
+    actions_24h = 0
+    failed_logins_24h = 0
+    recent_events = []
+    for event in audit_events:
+        at = parse_iso(event.get("at"))
+        if at and at >= now - timedelta(hours=24):
+            actions_24h += 1
+            if event.get("action") == "login" and event.get("outcome") != "success":
+                failed_logins_24h += 1
+        actor = event.get("actor", {})
+        recent_events.append(
+            {
+                "id": event.get("id"),
+                "action": event.get("action", "event"),
+                "outcome": event.get("outcome", "success"),
+                "headline": event.get("detail") or event.get("action", "event"),
+                "detail": event.get("meta", {}),
+                "actor": actor.get("displayName") or actor.get("username") or "system",
+                "role": actor.get("role", ""),
+                "at": event.get("at", ""),
+                "atAgo": format_age(at, now) if at else "未知时间",
+            }
+        )
+    role_matrix = [
+        {
+            "role": role,
+            "label": meta["label"],
+            "description": meta["description"],
+            "permissions": permissions_for_role(role),
+        }
+        for role, meta in USER_ROLES.items()
+    ]
+    metadata = config.get("sanshengLiubu", {})
+    return {
+        "workspace": {
+            "displayName": metadata.get("displayName") or metadata.get("theme", "Mission Control"),
+            "projectDir": metadata.get("projectDir", ""),
+            "openclawDir": str(openclaw_dir),
+        },
+        "seatSummary": {
+            "total": len(users),
+            "owner": counts["owner"],
+            "operator": counts["operator"],
+            "viewer": counts["viewer"],
+            "active": status_counts["active"],
+            "suspended": status_counts["suspended"],
+            "actions24h": actions_24h,
+            "failedLogins24h": failed_logins_24h,
+        },
+        "users": users if include_sensitive else [],
+        "auditEvents": recent_events[:32] if include_sensitive else [],
+        "roleMatrix": role_matrix,
+        "hasUsers": bool(users),
+    }
+
+
 def resolve_dashboard_auth_token(openclaw_dir):
     for key in ("DASHBOARD_AUTH_TOKEN", "GATEWAY_AUTH_TOKEN"):
         value = os.environ.get(key) or read_env_value(openclaw_dir, key)
@@ -3897,8 +5298,27 @@ def resolve_dashboard_auth_token(openclaw_dir):
     return ""
 
 
-def expected_session_value(auth_token):
-    return hmac.new(auth_token.encode("utf-8"), b"sansheng-liubu-dashboard", hashlib.sha256).hexdigest()
+def sign_session_payload(auth_token, payload_text):
+    return hmac.new(auth_token.encode("utf-8"), payload_text.encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+def encode_session_cookie(auth_token, session_data):
+    payload = encode_base64url(json.dumps(session_data, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+    return f"{payload}.{sign_session_payload(auth_token, payload)}"
+
+
+def decode_session_cookie(auth_token, cookie_value):
+    try:
+        payload, signature = str(cookie_value or "").split(".", 1)
+        if not hmac.compare_digest(signature, sign_session_payload(auth_token, payload)):
+            return None
+        data = json.loads(decode_base64url(payload).decode("utf-8"))
+        expires_at = parse_iso(data.get("expiresAt"))
+        if expires_at and expires_at < now_utc():
+            return None
+        return data
+    except Exception:
+        return None
 
 
 def expected_action_value(auth_token):
@@ -3939,14 +5359,28 @@ def runtime_script_path(openclaw_dir, script_name):
     raise FileNotFoundError(f"Missing runtime script: {script_name}")
 
 
-def run_python_script(script_path, args, cwd=None):
+def openclaw_command_env(openclaw_dir):
+    env = os.environ.copy()
+    resolved_dir = str(Path(openclaw_dir).expanduser().resolve())
+    env["OPENCLAW_STATE_DIR"] = resolved_dir
+    env["OPENCLAW_CONFIG_PATH"] = str(Path(resolved_dir) / "openclaw.json")
+    return env
+
+
+def run_command(args, cwd=None, env=None):
     process = subprocess.run(
-        ["python3", str(script_path), *[str(arg) for arg in args]],
+        [str(arg) for arg in args],
         capture_output=True,
         text=True,
         cwd=str(cwd) if cwd else None,
+        env=env,
         check=False,
     )
+    return process
+
+
+def run_python_script(script_path, args, cwd=None):
+    process = run_command(["python3", str(script_path), *[str(arg) for arg in args]], cwd=cwd)
     output_parts = [part.strip() for part in (process.stdout, process.stderr) if part and part.strip()]
     return process, "\n".join(output_parts)
 
@@ -4025,6 +5459,420 @@ def perform_theme_switch(openclaw_dir, theme_name):
         raise RuntimeError(output or f"切换主题失败: {theme_name}")
 
 
+def skills_cli_path(openclaw_dir, config=None):
+    project_dir = resolve_project_dir(openclaw_dir, config=config)
+    if not project_dir:
+        return None, None
+    cli_path = project_dir / "bin" / "skill_utils.py"
+    if not cli_path.exists():
+        return project_dir, None
+    return project_dir, cli_path
+
+
+def load_skills_catalog(openclaw_dir, config=None):
+    project_dir, cli_path = skills_cli_path(openclaw_dir, config=config)
+    if not project_dir or not cli_path:
+        return {
+            "supported": False,
+            "error": "当前安装没有关联可用的 skill 工具脚本。",
+            "summary": {"total": 0, "ready": 0, "warning": 0, "error": 0, "packaged": 0, "categories": {}},
+            "skills": [],
+            "guidance": [],
+            "commands": [],
+        }
+
+    def build():
+        result, output = run_python_script(
+            cli_path,
+            ["list", "--project-dir", str(project_dir)],
+            cwd=project_dir,
+        )
+        if result.returncode != 0:
+            return {
+                "supported": False,
+                "error": output or "读取技能目录失败。",
+                "summary": {"total": 0, "ready": 0, "warning": 0, "error": 0, "packaged": 0, "categories": {}},
+                "skills": [],
+                "guidance": [],
+                "commands": [],
+            }
+
+        payload = parse_json_payload(result.stdout, output, default=None)
+        if payload is None:
+            return {
+                "supported": False,
+                "error": output or "技能目录输出不是合法 JSON。",
+                "summary": {"total": 0, "ready": 0, "warning": 0, "error": 0, "packaged": 0, "categories": {}},
+                "skills": [],
+                "guidance": [],
+                "commands": [],
+            }
+
+        payload["supported"] = True
+        payload["commands"] = [
+            {
+                "label": "扫描技能目录",
+                "command": f"python3 {cli_path} list --project-dir {project_dir}",
+                "description": "查看当前 skills 目录、校验状态和打包准备度。",
+            },
+            {
+                "label": "校验技能质量",
+                "command": f"python3 {cli_path} validate --project-dir {project_dir}",
+                "description": "按 Anthropic Skills 指南检查 frontmatter、结构和触发质量。",
+            },
+        ]
+        return payload
+
+    return cached_payload(("local-skills", str(project_dir), str(Path(openclaw_dir).expanduser().resolve())), 10, build)
+
+
+def top_counter_items(counter, limit=6):
+    return [{"name": name, "count": count} for name, count in counter.most_common(limit)]
+
+
+def load_openclaw_control_data(openclaw_dir):
+    openclaw_dir = Path(openclaw_dir).expanduser().resolve()
+
+    def build():
+        env = openclaw_command_env(openclaw_dir)
+        try:
+            version_result = run_command(["openclaw", "--version"], env=env)
+        except FileNotFoundError:
+            return {
+                "supported": False,
+                "error": "未检测到 openclaw CLI。",
+                "version": {"raw": "unknown", "release": "", "build": ""},
+                "config": {"valid": False, "path": str(openclaw_dir / "openclaw.json"), "error": "missing_cli"},
+                "gateway": {"ok": False, "channels": [], "agentCount": 0, "defaultAgentId": "", "error": "missing_cli"},
+                "nativeSkills": {
+                    "total": 0,
+                    "eligible": 0,
+                    "disabled": 0,
+                    "blocked": 0,
+                    "bundled": 0,
+                    "external": 0,
+                    "sampleEligible": [],
+                    "sampleMissing": [],
+                    "missingBins": [],
+                    "missingEnv": [],
+                    "missingConfig": [],
+                    "sourceBreakdown": [],
+                    "warnings": [],
+                },
+                "compatibility": [],
+                "commands": [],
+                "_nativeSkillNames": [],
+            }
+
+        version_raw = (version_result.stdout or version_result.stderr or "").strip()
+        release_text = ""
+        build_text = ""
+        if version_raw.startswith("OpenClaw "):
+            after_name = version_raw.split("OpenClaw ", 1)[1]
+            if " (" in after_name and after_name.endswith(")"):
+                release_text, build_text = after_name[:-1].split(" (", 1)
+            else:
+                release_text = after_name
+
+        config_result = run_command(["openclaw", "config", "validate", "--json"], env=env)
+        config_payload = parse_json_payload(config_result.stdout, config_result.stderr, default=None)
+        if config_payload is None:
+            config_payload = {
+                "valid": False,
+                "path": str(openclaw_dir / "openclaw.json"),
+                "error": (config_result.stderr or config_result.stdout or "config_validate_failed").strip(),
+            }
+
+        health_result = run_command(["openclaw", "gateway", "health", "--json"], env=env)
+        health_payload = parse_json_payload(health_result.stdout, health_result.stderr, default=None)
+        if health_payload is None:
+            health_payload = {
+                "ok": False,
+                "error": (health_result.stderr or health_result.stdout or "gateway_health_failed").strip(),
+                "channels": {},
+                "agents": [],
+            }
+
+        skills_result = run_command(["openclaw", "skills", "list", "--json"], env=env)
+        native_skills_payload = parse_json_payload(skills_result.stdout, skills_result.stderr, default={"skills": []})
+        native_skill_entries = native_skills_payload.get("skills", []) if isinstance(native_skills_payload, dict) else []
+        managed_skills_dir = native_skills_payload.get("managedSkillsDir", "") if isinstance(native_skills_payload, dict) else ""
+        workspace_dir = native_skills_payload.get("workspaceDir", "") if isinstance(native_skills_payload, dict) else ""
+
+        source_counter = Counter(item.get("source", "unknown") for item in native_skill_entries)
+        missing_bins = Counter()
+        missing_env = Counter()
+        missing_config = Counter()
+        sample_eligible = []
+        sample_missing = []
+        native_skill_names = []
+        bundled = 0
+        external = 0
+        disabled = 0
+        blocked = 0
+        eligible = 0
+        for item in native_skill_entries:
+            name = item.get("name", "")
+            if name:
+                native_skill_names.append(name)
+            if item.get("bundled"):
+                bundled += 1
+            else:
+                external += 1
+            if item.get("disabled"):
+                disabled += 1
+            if item.get("blockedByAllowlist"):
+                blocked += 1
+            if item.get("eligible"):
+                eligible += 1
+                if len(sample_eligible) < 8:
+                    sample_eligible.append(
+                        {
+                            "title": item.get("name", "unknown"),
+                            "meta": f"{item.get('source', 'unknown')} · {'bundled' if item.get('bundled') else 'external'}",
+                            "detail": item.get("description", ""),
+                        }
+                    )
+            missing = item.get("missing", {}) if isinstance(item.get("missing"), dict) else {}
+            for bin_name in missing.get("bins", []) or []:
+                missing_bins[bin_name] += 1
+            for env_name in missing.get("env", []) or []:
+                missing_env[env_name] += 1
+            for config_name in missing.get("config", []) or []:
+                missing_config[config_name] += 1
+            if not item.get("eligible") and len(sample_missing) < 8:
+                reasons = []
+                if missing.get("bins"):
+                    reasons.append(f"缺少命令: {', '.join(missing.get('bins', [])[:2])}")
+                if missing.get("env"):
+                    reasons.append(f"缺少环境变量: {', '.join(missing.get('env', [])[:2])}")
+                if missing.get("config"):
+                    reasons.append(f"缺少配置: {', '.join(missing.get('config', [])[:2])}")
+                sample_missing.append(
+                    {
+                        "title": item.get("name", "unknown"),
+                        "meta": item.get("source", "unknown"),
+                        "detail": " · ".join(reasons) or item.get("description", ""),
+                    }
+                )
+
+        channel_entries = []
+        health_channels = health_payload.get("channels", {}) if isinstance(health_payload, dict) else {}
+        channel_order = health_payload.get("channelOrder", []) if isinstance(health_payload, dict) else []
+        health_labels = health_payload.get("channelLabels", {}) if isinstance(health_payload, dict) else {}
+        ordered_names = channel_order or list(health_channels.keys())
+        for channel_name in ordered_names:
+            channel = health_channels.get(channel_name, {})
+            probe = channel.get("probe", {}) if isinstance(channel.get("probe"), dict) else {}
+            detail = ""
+            if channel_name == "telegram" and isinstance(probe.get("bot"), dict):
+                detail = probe["bot"].get("username", "")
+            elif channel_name == "feishu":
+                detail = probe.get("appId", "")
+            channel_entries.append(
+                {
+                    "title": health_labels.get(channel_name, channel_name),
+                    "meta": "configured" if channel.get("configured") else "not configured",
+                    "detail": detail or channel.get("lastError") or "无额外信息",
+                    "healthy": bool(probe.get("ok")) if probe else bool(channel.get("configured")),
+                    "running": bool(channel.get("running")),
+                }
+            )
+
+        compatibility = [
+            {
+                "title": "OpenClaw 版本",
+                "status": "ready" if is_supported_openclaw_release(release_text) else "warning",
+                "body": version_raw or "unknown",
+                "meta": f"当前产品按 OpenClaw {OPENCLAW_BASELINE_RELEASE}+ 适配。",
+            },
+            {
+                "title": "配置校验",
+                "status": "ready" if config_payload.get("valid") else "error",
+                "body": "openclaw.json 已通过 schema 校验。" if config_payload.get("valid") else "当前配置未通过 schema 校验。",
+                "meta": config_payload.get("path") or str(openclaw_dir / "openclaw.json"),
+            },
+            {
+                "title": "Gateway 健康",
+                "status": "ready" if health_payload.get("ok") else "warning",
+                "body": "Gateway 健康检查通过。" if health_payload.get("ok") else "Gateway 健康检查失败或未返回结构化结果。",
+                "meta": f"channel {len(channel_entries)} · agent {len(health_payload.get('agents', []) or [])}",
+            },
+            {
+                "title": "原生 Skills",
+                "status": "ready" if native_skill_entries else "warning",
+                "body": f"OpenClaw 当前识别到 {len(native_skill_entries)} 个原生 skills，其中 {eligible} 个可直接使用。",
+                "meta": f"bundled {bundled} · external {external}",
+            },
+            {
+                "title": "Managed Skills 目录",
+                "status": "ready" if managed_skills_dir else "warning",
+                "body": managed_skills_dir or "当前没有返回 managed skills 目录。",
+                "meta": workspace_dir or str(openclaw_dir),
+            },
+        ]
+
+        env_prefix = f'OPENCLAW_STATE_DIR="{openclaw_dir}" OPENCLAW_CONFIG_PATH="{openclaw_dir / "openclaw.json"}"'
+        return {
+            "supported": True,
+            "error": "",
+            "version": {"raw": version_raw, "release": release_text, "build": build_text},
+            "config": config_payload,
+            "gateway": {
+                "ok": bool(health_payload.get("ok")),
+                "durationMs": health_payload.get("durationMs"),
+                "defaultAgentId": health_payload.get("defaultAgentId", ""),
+                "agentCount": len(health_payload.get("agents", []) or []),
+                "channels": channel_entries,
+                "error": health_payload.get("error", ""),
+            },
+            "nativeSkills": {
+                "total": len(native_skill_entries),
+                "eligible": eligible,
+                "disabled": disabled,
+                "blocked": blocked,
+                "bundled": bundled,
+                "external": external,
+                "managedSkillsDir": managed_skills_dir,
+                "workspaceDir": workspace_dir,
+                "sampleEligible": sample_eligible,
+                "sampleMissing": sample_missing,
+                "missingBins": top_counter_items(missing_bins),
+                "missingEnv": top_counter_items(missing_env),
+                "missingConfig": top_counter_items(missing_config),
+                "sourceBreakdown": top_counter_items(source_counter),
+                "warnings": [line.strip() for line in (skills_result.stderr or "").splitlines() if line.strip()],
+            },
+            "compatibility": compatibility,
+            "commands": [
+                {
+                    "label": "OpenClaw Dashboard",
+                    "command": f"{env_prefix} openclaw dashboard --no-open",
+                    "description": "输出官方 Control UI 地址，不在浏览器里自动打开。",
+                },
+                {
+                    "label": "Schema 校验",
+                    "command": f"{env_prefix} openclaw config validate --json",
+                    "description": "校验当前安装目录里的 openclaw.json 是否仍然有效。",
+                },
+                {
+                    "label": "Gateway 健康",
+                    "command": f"{env_prefix} openclaw gateway health --json",
+                    "description": "获取当前 Gateway、channels、agents 的结构化健康数据。",
+                },
+                {
+                    "label": "原生 Skills",
+                    "command": f"{env_prefix} openclaw skills list --json",
+                    "description": "查看 OpenClaw 当前可识别的 skills 目录和可用性。",
+                },
+                {
+                    "label": "Doctor",
+                    "command": f"{env_prefix} openclaw doctor --non-interactive",
+                    "description": "运行官方健康检查与修复建议流程。",
+                },
+                {
+                    "label": "Onboard",
+                    "command": f"{env_prefix} openclaw onboard",
+                    "description": "进入官方 onboarding wizard，配置 gateway、workspace 和 skills。",
+                },
+            ],
+            "_nativeSkillNames": native_skill_names,
+        }
+
+    return cached_payload(("openclaw-control", str(openclaw_dir)), 30, build)
+
+
+def perform_skill_scaffold(
+    openclaw_dir,
+    slug,
+    title,
+    description,
+    trigger_phrase,
+    category,
+    include_scripts=False,
+    include_references=True,
+    include_assets=False,
+    mcp_server="",
+):
+    project_dir, cli_path = skills_cli_path(openclaw_dir)
+    if not project_dir or not cli_path:
+        raise RuntimeError("当前安装没有关联 skill 工具脚本，无法创建新技能。")
+    args = [
+        "scaffold",
+        "--project-dir",
+        str(project_dir),
+        "--slug",
+        slug,
+        "--title",
+        title,
+        "--description",
+        description,
+        "--trigger-phrase",
+        trigger_phrase,
+        "--category",
+        category,
+        "--version",
+        "1.0.0",
+    ]
+    if include_scripts:
+        args.append("--include-scripts")
+    if include_references:
+        args.append("--include-references")
+    if include_assets:
+        args.append("--include-assets")
+    if mcp_server:
+        args.extend(["--mcp-server", mcp_server])
+    result, output = run_python_script(cli_path, args, cwd=project_dir)
+    if result.returncode != 0:
+        raise RuntimeError(output or f"创建技能失败: {slug}")
+    try:
+        return json.loads(result.stdout or output or "{}")
+    except json.JSONDecodeError as error:
+        raise RuntimeError(f"技能脚手架输出异常: {error}") from error
+
+
+def perform_skill_package(openclaw_dir, slug):
+    project_dir, cli_path = skills_cli_path(openclaw_dir)
+    if not project_dir or not cli_path:
+        raise RuntimeError("当前安装没有关联 skill 工具脚本，无法打包技能。")
+    result, output = run_python_script(
+        cli_path,
+        ["package", "--project-dir", str(project_dir), "--skill", slug],
+        cwd=project_dir,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(output or f"打包技能失败: {slug}")
+    try:
+        return json.loads(result.stdout or output or "{}")
+    except json.JSONDecodeError as error:
+        raise RuntimeError(f"技能打包输出异常: {error}") from error
+
+
+def perform_skill_publish(openclaw_dir, slug):
+    project_dir, cli_path = skills_cli_path(openclaw_dir)
+    if not project_dir or not cli_path:
+        raise RuntimeError("当前安装没有关联 skill 工具脚本，无法发布技能到 OpenClaw。")
+    result, output = run_python_script(
+        cli_path,
+        [
+            "publish",
+            "--project-dir",
+            str(project_dir),
+            "--openclaw-dir",
+            str(Path(openclaw_dir).expanduser().resolve()),
+            "--skill",
+            slug,
+        ],
+        cwd=project_dir,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(output or f"发布技能失败: {slug}")
+    try:
+        return json.loads(result.stdout or output or "{}")
+    except json.JSONDecodeError as error:
+        raise RuntimeError(f"技能发布输出异常: {error}") from error
+
+
 def parse_request_cookies(cookie_header):
     cookie = SimpleCookie()
     if cookie_header:
@@ -4047,6 +5895,14 @@ def render_login_html(openclaw_dir, next_path="/", error_message=""):
     theme_meta = THEME_CATALOG.get(theme_name, THEME_CATALOG["imperial"])
     router_agent_id = get_router_agent_id(config)
     kanban_cfg = load_kanban_config(openclaw_dir, router_agent_id)
+    users = load_product_users(openclaw_dir)
+    team_status = f"{len(users)} 个团队席位" if users else "尚未创建团队席位"
+    auth_mode = "团队账号 + Token Fallback" if users else "Bootstrap 模式"
+    bootstrap_help = (
+        "当前已经启用团队账号。日常使用建议改走账号登录，Owner Token 仅保留给初始化和紧急接管。"
+        if users
+        else "当前还没有团队账号。请先使用 Owner Token 进入，在后台创建 owner / operator / viewer 席位。"
+    )
     return LOGIN_TEMPLATE.format(
         bg=theme_style["bg"],
         bg2=theme_style["bg2"],
@@ -4063,13 +5919,44 @@ def render_login_html(openclaw_dir, next_path="/", error_message=""):
         theme_summary=theme_meta["summary"],
         next_path=safe_next_path(next_path),
         openclaw_dir=openclaw_dir,
+        team_status=team_status,
+        auth_mode=auth_mode,
+        bootstrap_help=bootstrap_help,
         error_message=error_message or "",
         error_hidden="hidden" if not error_message else "",
     )
 
 
+def find_product_user(openclaw_dir, username):
+    normalized = normalize_username(username)
+    return next((user for user in load_product_users(openclaw_dir) if user["username"] == normalized), None)
+
+
+def session_for_client(session):
+    if not session:
+        return {"displayName": "Guest", "role": "viewer", "roleLabel": role_meta("viewer")["label"], "kind": "guest"}
+    role = session.get("role", "viewer")
+    return {
+        "displayName": session.get("displayName") or session.get("username") or "User",
+        "username": session.get("username", ""),
+        "role": role,
+        "roleLabel": role_meta(role)["label"],
+        "kind": session.get("kind", "user"),
+    }
+
+
+def actor_from_session(session):
+    client = session_for_client(session)
+    return {
+        "displayName": client["displayName"],
+        "username": client.get("username", ""),
+        "role": client["role"],
+        "kind": client.get("kind", "user"),
+    }
+
+
 class CollaborationDashboardHandler(BaseHTTPRequestHandler):
-    server_version = "SanshengDashboard/1.8"
+    server_version = f"SanshengDashboard/{PRODUCT_VERSION}"
 
     def log_message(self, format, *args):
         return
@@ -4091,11 +5978,22 @@ class CollaborationDashboardHandler(BaseHTTPRequestHandler):
     def _runtime_data(self, data):
         config = load_config(self.server.openclaw_dir)
         project_dir = resolve_project_dir(self.server.openclaw_dir, config)
+        permissions = self._permissions()
+        include_sensitive_admin = self._can("auditView") or self._can("adminWrite")
+        data["admin"] = build_admin_data(
+            self.server.openclaw_dir,
+            config,
+            now_utc(),
+            include_sensitive=include_sensitive_admin,
+        )
         runtime = {
             "productVersion": PRODUCT_VERSION,
-            "actionsEnabled": True,
-            "themeSwitchAvailable": bool(project_dir and (project_dir / "bin" / "switch_theme.py").exists()),
+            "actionsEnabled": permissions.get("taskWrite") or permissions.get("themeWrite") or permissions.get("adminWrite"),
+            "themeSwitchAvailable": bool(project_dir and (project_dir / "bin" / "switch_theme.py").exists() and permissions.get("themeWrite")),
             "actionToken": expected_action_value(getattr(self.server, "dashboard_auth_token", "")),
+            "currentUser": session_for_client(self._session()),
+            "permissions": permissions,
+            "authMode": "accounts" if data.get("admin", {}).get("hasUsers") else "token",
         }
         data["runtime"] = runtime
         return data
@@ -4103,6 +6001,10 @@ class CollaborationDashboardHandler(BaseHTTPRequestHandler):
     def _bundle(self):
         data, paths = build_dashboard_bundle(self.server.openclaw_dir, self.server.output_dir)
         return self._runtime_data(data), paths
+
+    def _refreshed_bundle(self):
+        clear_cached_payloads()
+        return self._bundle()
 
     def _path(self):
         return urlsplit(self.path).path
@@ -4118,19 +6020,44 @@ class CollaborationDashboardHandler(BaseHTTPRequestHandler):
     def _next_path(self):
         return safe_next_path(self._query().get("next", ["/"])[0])
 
-    def _is_authenticated(self):
+    def _session(self):
+        cached = getattr(self, "_cached_session", None)
+        if cached is not None:
+            return cached
         auth_token = getattr(self.server, "dashboard_auth_token", "")
         if not auth_token:
-            return True
+            session = {
+                "kind": "open",
+                "username": "local-open",
+                "displayName": "Local Access",
+                "role": "owner",
+                "issuedAt": now_iso(),
+                "expiresAt": (now_utc() + timedelta(hours=12)).isoformat().replace("+00:00", "Z"),
+            }
+            self._cached_session = session
+            return session
         cookies = parse_request_cookies(self.headers.get("Cookie", ""))
         current = cookies.get(SESSION_COOKIE_NAME, "")
-        return bool(current) and hmac.compare_digest(current, expected_session_value(auth_token))
+        session = decode_session_cookie(auth_token, current)
+        self._cached_session = session
+        return session
 
-    def _login_cookie_header(self):
+    def _is_authenticated(self):
+        return self._session() is not None
+
+    def _permissions(self):
+        session = self._session()
+        role = session.get("role", "viewer") if session else "viewer"
+        return permissions_for_role(role)
+
+    def _can(self, permission_key):
+        return bool(self._permissions().get(permission_key))
+
+    def _login_cookie_header(self, session_data):
         auth_token = getattr(self.server, "dashboard_auth_token", "")
         return (
             "Set-Cookie",
-            f"{SESSION_COOKIE_NAME}={expected_session_value(auth_token)}; Max-Age={SESSION_COOKIE_MAX_AGE}; Path=/; HttpOnly; SameSite=Lax",
+            f"{SESSION_COOKIE_NAME}={encode_session_cookie(auth_token, session_data)}; Max-Age={SESSION_COOKIE_MAX_AGE}; Path=/; HttpOnly; SameSite=Lax",
         )
 
     def _clear_cookie_header(self):
@@ -4148,6 +6075,22 @@ class CollaborationDashboardHandler(BaseHTTPRequestHandler):
             return True
         self._send_json({"ok": False, "error": "invalid_action_token", "message": "操作令牌已失效，请刷新页面后重试。"}, status=403)
         return False
+
+    def _require_capability(self, permission_key, message, status=403):
+        if self._can(permission_key):
+            return True
+        self._send_json({"ok": False, "error": "permission_denied", "message": message}, status=status)
+        return False
+
+    def _audit(self, action, outcome="success", detail="", meta=None):
+        return append_audit_event(
+            self.server.openclaw_dir,
+            action,
+            actor_from_session(self._session()),
+            outcome=outcome,
+            detail=detail,
+            meta=meta,
+        )
 
     def _send_redirect(self, location, extra_headers=None):
         headers = [("Location", location)]
@@ -4182,24 +6125,94 @@ class CollaborationDashboardHandler(BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length", "0") or "0")
         payload = self.rfile.read(length).decode("utf-8", "replace")
         form = parse_qs(payload)
-        submitted = (form.get("token", [""])[0] or "").strip()
+        mode = (form.get("mode", ["password"])[0] or "password").strip()
         next_path = safe_next_path((form.get("next", ["/"])[0] or "/"))
         auth_token = getattr(self.server, "dashboard_auth_token", "")
-        if auth_token and hmac.compare_digest(submitted, auth_token):
-            self._send_redirect(next_path, extra_headers=[self._login_cookie_header()])
+        if mode == "password":
+            username = normalize_username(form.get("username", [""])[0])
+            password = (form.get("password", [""])[0] or "").strip()
+            user = find_product_user(self.server.openclaw_dir, username)
+            if user and user.get("status") == "active" and verify_password(password, user.get("passwordHash", "")):
+                session_data = {
+                    "kind": "user",
+                    "username": user["username"],
+                    "displayName": user.get("displayName") or user["username"],
+                    "role": user.get("role", "viewer"),
+                    "issuedAt": now_iso(),
+                    "expiresAt": (now_utc() + timedelta(hours=12)).isoformat().replace("+00:00", "Z"),
+                }
+                update_product_user_login(self.server.openclaw_dir, username)
+                append_audit_event(
+                    self.server.openclaw_dir,
+                    "login",
+                    actor_from_session(session_data),
+                    detail="团队账号登录成功。",
+                    meta={"mode": "password"},
+                )
+                self._send_redirect(next_path, extra_headers=[self._login_cookie_header(session_data)])
+                return
+            append_audit_event(
+                self.server.openclaw_dir,
+                "login",
+                {"displayName": username or "unknown", "username": username, "role": "viewer", "kind": "anonymous"},
+                outcome="denied",
+                detail="团队账号登录失败。",
+                meta={"mode": "password"},
+            )
+            body = render_login_html(
+                self.server.openclaw_dir,
+                next_path=next_path,
+                error_message="团队账号或密码不正确，请重新输入。",
+            ).encode("utf-8")
+            self._send_bytes(body, "text/html; charset=utf-8", status=401)
             return
+
+        submitted = (form.get("token", [""])[0] or "").strip()
+        if auth_token and hmac.compare_digest(submitted, auth_token):
+            session_data = {
+                "kind": "token",
+                "username": "owner-token",
+                "displayName": "Owner Token",
+                "role": "owner",
+                "issuedAt": now_iso(),
+                "expiresAt": (now_utc() + timedelta(hours=12)).isoformat().replace("+00:00", "Z"),
+            }
+            append_audit_event(
+                self.server.openclaw_dir,
+                "login",
+                actor_from_session(session_data),
+                detail="Owner Token 登录成功。",
+                meta={"mode": "token"},
+            )
+            self._send_redirect(next_path, extra_headers=[self._login_cookie_header(session_data)])
+            return
+        append_audit_event(
+            self.server.openclaw_dir,
+            "login",
+            {"displayName": "Owner Token", "username": "owner-token", "role": "owner", "kind": "anonymous"},
+            outcome="denied",
+            detail="Owner Token 登录失败。",
+            meta={"mode": "token"},
+        )
         body = render_login_html(
             self.server.openclaw_dir,
             next_path=next_path,
-            error_message="控制令牌不正确，请重新输入。",
+            error_message="Owner Token 不正确，请重新输入。",
         ).encode("utf-8")
         self._send_bytes(body, "text/html; charset=utf-8", status=401)
 
     def _handle_logout_post(self):
+        session = self._session()
         length = int(self.headers.get("Content-Length", "0") or "0")
         payload = self.rfile.read(length).decode("utf-8", "replace") if length else ""
         form = parse_qs(payload)
         next_path = safe_next_path((form.get("next", ["/login"])[0] or "/login"))
+        append_audit_event(
+            self.server.openclaw_dir,
+            "logout",
+            actor_from_session(session),
+            detail="用户已退出 Mission Control。",
+        )
         self._send_redirect(next_path, extra_headers=[self._clear_cookie_header()])
 
     def _handle_action_post(self, path):
@@ -4214,12 +6227,15 @@ class CollaborationDashboardHandler(BaseHTTPRequestHandler):
 
         try:
             if path == "/api/actions/task/create":
+                if not self._require_capability("taskWrite", "当前账号没有创建或推进任务的权限。"):
+                    return
                 title = str(payload.get("title", "")).strip()
                 remark = str(payload.get("remark", "")).strip()
                 if not title:
                     raise RuntimeError("任务标题不能为空。")
                 task_id = perform_task_create(self.server.openclaw_dir, title, remark=remark)
-                data, _paths = self._bundle()
+                self._audit("task_create", detail=f"创建任务 {task_id}", meta={"taskId": task_id, "title": title})
+                data, _paths = self._refreshed_bundle()
                 self._send_json(
                     {
                         "ok": True,
@@ -4231,6 +6247,8 @@ class CollaborationDashboardHandler(BaseHTTPRequestHandler):
                 return
 
             if path == "/api/actions/task/progress":
+                if not self._require_capability("taskWrite", "当前账号没有推进任务的权限。"):
+                    return
                 task_id = str(payload.get("taskId", "")).strip()
                 message = str(payload.get("message", "")).strip()
                 todos = str(payload.get("todos", "")).strip()
@@ -4238,7 +6256,12 @@ class CollaborationDashboardHandler(BaseHTTPRequestHandler):
                 if not task_id or not message:
                     raise RuntimeError("任务编号和进展内容都不能为空。")
                 perform_task_progress(self.server.openclaw_dir, task_id, message, todos=todos, mark_doing=mark_doing)
-                data, _paths = self._bundle()
+                self._audit(
+                    "task_progress",
+                    detail=f"同步任务 {task_id} 的进展",
+                    meta={"taskId": task_id, "markDoing": mark_doing},
+                )
+                data, _paths = self._refreshed_bundle()
                 self._send_json(
                     {
                         "ok": True,
@@ -4250,12 +6273,15 @@ class CollaborationDashboardHandler(BaseHTTPRequestHandler):
                 return
 
             if path == "/api/actions/task/block":
+                if not self._require_capability("taskWrite", "当前账号没有标记阻塞的权限。"):
+                    return
                 task_id = str(payload.get("taskId", "")).strip()
                 reason = str(payload.get("reason", "")).strip()
                 if not task_id or not reason:
                     raise RuntimeError("请提供任务编号和阻塞原因。")
                 perform_task_block(self.server.openclaw_dir, task_id, reason)
-                data, _paths = self._bundle()
+                self._audit("task_block", detail=f"标记任务 {task_id} 阻塞", meta={"taskId": task_id})
+                data, _paths = self._refreshed_bundle()
                 self._send_json(
                     {
                         "ok": True,
@@ -4267,13 +6293,16 @@ class CollaborationDashboardHandler(BaseHTTPRequestHandler):
                 return
 
             if path == "/api/actions/task/done":
+                if not self._require_capability("taskWrite", "当前账号没有完成任务的权限。"):
+                    return
                 task_id = str(payload.get("taskId", "")).strip()
                 summary = str(payload.get("summary", "")).strip()
                 output_path = str(payload.get("output", "")).strip()
                 if not task_id:
                     raise RuntimeError("请提供任务编号。")
                 perform_task_done(self.server.openclaw_dir, task_id, output_path=output_path, summary=summary)
-                data, _paths = self._bundle()
+                self._audit("task_done", detail=f"完成任务 {task_id}", meta={"taskId": task_id, "output": output_path})
+                data, _paths = self._refreshed_bundle()
                 self._send_json(
                     {
                         "ok": True,
@@ -4285,12 +6314,15 @@ class CollaborationDashboardHandler(BaseHTTPRequestHandler):
                 return
 
             if path == "/api/actions/theme/switch":
+                if not self._require_capability("themeWrite", "只有 Owner 可以切换主题。"):
+                    return
                 theme_name = str(payload.get("theme", "")).strip()
                 if theme_name not in THEME_CATALOG:
                     raise RuntimeError(f"未知主题：{theme_name}")
                 perform_theme_switch(self.server.openclaw_dir, theme_name)
+                self._audit("theme_switch", detail=f"切换主题到 {theme_name}", meta={"theme": theme_name})
                 self.server.dashboard_auth_token = resolve_dashboard_auth_token(self.server.openclaw_dir)
-                data, _paths = self._bundle()
+                data, _paths = self._refreshed_bundle()
                 display_name = data.get("theme", {}).get("displayName", theme_name)
                 self._send_json(
                     {
@@ -4301,10 +6333,152 @@ class CollaborationDashboardHandler(BaseHTTPRequestHandler):
                 )
                 return
 
+            if path == "/api/actions/admin/user/create":
+                if not self._require_capability("adminWrite", "只有 Owner 可以管理团队席位。"):
+                    return
+                username = str(payload.get("username", "")).strip()
+                display_name = str(payload.get("displayName", "")).strip()
+                role = str(payload.get("role", "")).strip()
+                password = str(payload.get("password", "")).strip()
+                user = create_product_user(self.server.openclaw_dir, username, display_name, role, password)
+                self._audit("user_create", detail=f"创建团队席位 {user['displayName']}", meta={"username": user["username"], "role": user["role"]})
+                data, _paths = self._refreshed_bundle()
+                self._send_json(
+                    {
+                        "ok": True,
+                        "message": f"团队账号 {user['displayName']} 已创建。",
+                        "dashboard": data,
+                    }
+                )
+                return
+
+            if path == "/api/actions/admin/user/update_access":
+                if not self._require_capability("adminWrite", "只有 Owner 可以调整团队席位。"):
+                    return
+                username = str(payload.get("username", "")).strip()
+                role = str(payload.get("role", "")).strip()
+                status = str(payload.get("status", "")).strip()
+                user = update_product_user_access(self.server.openclaw_dir, username, role, status)
+                self._audit(
+                    "user_access_update",
+                    detail=f"更新团队席位 {user['displayName']}",
+                    meta={"username": user["username"], "role": user["role"], "status": user["status"]},
+                )
+                data, _paths = self._refreshed_bundle()
+                self._send_json(
+                    {
+                        "ok": True,
+                        "message": f"团队席位 {user['displayName']} 已更新为 {user['roleLabel']} / {user['status']}。",
+                        "dashboard": data,
+                    }
+                )
+                return
+
+            if path == "/api/actions/admin/user/reset_password":
+                if not self._require_capability("adminWrite", "只有 Owner 可以重置团队账号密码。"):
+                    return
+                username = str(payload.get("username", "")).strip()
+                password = str(payload.get("password", "")).strip()
+                user = reset_product_user_password(self.server.openclaw_dir, username, password)
+                self._audit(
+                    "user_password_reset",
+                    detail=f"重置团队账号 {user['displayName']} 的密码",
+                    meta={"username": user["username"]},
+                )
+                data, _paths = self._refreshed_bundle()
+                self._send_json(
+                    {
+                        "ok": True,
+                        "message": f"团队账号 {user['displayName']} 的密码已经重置。",
+                        "dashboard": data,
+                    }
+                )
+                return
+
+            if path == "/api/actions/skills/scaffold":
+                if not self._require_capability("adminWrite", "只有 Owner 可以创建和维护技能目录。"):
+                    return
+                slug = str(payload.get("slug", "")).strip()
+                title = str(payload.get("title", "")).strip()
+                description = str(payload.get("description", "")).strip()
+                trigger_phrase = str(payload.get("triggerPhrase", "")).strip()
+                category = str(payload.get("category", "")).strip() or "workflow-automation"
+                mcp_server = str(payload.get("mcpServer", "")).strip()
+                skill = perform_skill_scaffold(
+                    self.server.openclaw_dir,
+                    slug=slug,
+                    title=title,
+                    description=description,
+                    trigger_phrase=trigger_phrase,
+                    category=category,
+                    include_scripts=bool(payload.get("includeScripts")),
+                    include_references=payload.get("includeReferences", True) is not False,
+                    include_assets=bool(payload.get("includeAssets")),
+                    mcp_server=mcp_server,
+                )
+                self._audit(
+                    "skill_scaffold",
+                    detail=f"创建技能 {skill.get('slug', slug)}",
+                    meta={"skill": skill.get("slug", slug), "category": category},
+                )
+                data, _paths = self._refreshed_bundle()
+                self._send_json(
+                    {
+                        "ok": True,
+                        "message": f"技能 {skill.get('displayName', slug)} 已创建，并完成首次校验。",
+                        "dashboard": data,
+                    }
+                )
+                return
+
+            if path == "/api/actions/skills/package":
+                if not self._require_capability("adminWrite", "只有 Owner 可以打包和分发技能。"):
+                    return
+                slug = str(payload.get("slug", "")).strip()
+                bundle = perform_skill_package(self.server.openclaw_dir, slug)
+                self._audit(
+                    "skill_package",
+                    detail=f"打包技能 {slug}",
+                    meta={"skill": slug, "archivePath": bundle.get("archivePath", "")},
+                )
+                data, _paths = self._refreshed_bundle()
+                self._send_json(
+                    {
+                        "ok": True,
+                        "message": f"技能 {slug} 已打包到 {bundle.get('archivePath', '')}。",
+                        "dashboard": data,
+                    }
+                )
+                return
+
+            if path == "/api/actions/skills/publish":
+                if not self._require_capability("adminWrite", "只有 Owner 可以把技能发布到 OpenClaw。"):
+                    return
+                slug = str(payload.get("slug", "")).strip()
+                if not slug:
+                    raise RuntimeError("请先选择要发布的 skill。")
+                published = perform_skill_publish(self.server.openclaw_dir, slug)
+                self._audit(
+                    "skill_publish",
+                    detail=f"发布技能 {slug} 到 OpenClaw",
+                    meta={"skill": slug, "targetPath": published.get("targetPath", "")},
+                )
+                data, _paths = self._refreshed_bundle()
+                self._send_json(
+                    {
+                        "ok": True,
+                        "message": f"技能 {slug} 已发布到 {published.get('targetPath', '')}。",
+                        "dashboard": data,
+                    }
+                )
+                return
+
             self._send_json({"ok": False, "error": "not_found", "message": "未知操作接口。"}, status=404)
         except RuntimeError as error:
+            self._audit("action_error", outcome="denied", detail=str(error), meta={"path": path})
             self._send_json({"ok": False, "error": "action_failed", "message": str(error)}, status=400)
         except Exception as error:
+            self._audit("action_error", outcome="error", detail=str(error), meta={"path": path})
             self._send_json({"ok": False, "error": "internal_error", "message": str(error)}, status=500)
 
     def do_GET(self):
@@ -4314,7 +6488,7 @@ class CollaborationDashboardHandler(BaseHTTPRequestHandler):
             return
         if not self._require_auth(api=path.startswith("/api/") or path == "/events"):
             return
-        if path in ("/", "/overview", "/agents", "/tasks", "/activity", "/themes", "/collaboration-dashboard.html"):
+        if path in ("/", "/overview", "/agents", "/tasks", "/activity", "/themes", "/skills", "/openclaw", "/admin", "/collaboration-dashboard.html"):
             data, _paths = self._bundle()
             self._send_bytes(render_html(data).encode("utf-8"), "text/html; charset=utf-8")
             return
@@ -4343,9 +6517,27 @@ class CollaborationDashboardHandler(BaseHTTPRequestHandler):
             body = (json.dumps({"theme": data.get("theme", {}), "themeCatalog": data.get("themeCatalog", [])}, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
             self._send_bytes(body, "application/json; charset=utf-8")
             return
+        if path == "/api/skills":
+            data, _paths = self._bundle()
+            body = (json.dumps({"skills": data.get("skills", {})}, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+            self._send_bytes(body, "application/json; charset=utf-8")
+            return
+        if path == "/api/openclaw":
+            data, _paths = self._bundle()
+            body = (json.dumps({"openclaw": data.get("openclaw", {})}, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+            self._send_bytes(body, "application/json; charset=utf-8")
+            return
         if path == "/api/deliverables":
             data, _paths = self._bundle()
             body = (json.dumps({"deliverables": data.get("deliverables", [])}, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+            self._send_bytes(body, "application/json; charset=utf-8")
+            return
+        if path == "/api/admin":
+            if not self._can("auditView"):
+                self._send_json({"ok": False, "error": "permission_denied", "message": "当前账号没有查看后台治理数据的权限。"}, status=403)
+                return
+            data, _paths = self._bundle()
+            body = (json.dumps({"admin": data.get("admin", {})}, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
             self._send_bytes(body, "application/json; charset=utf-8")
             return
         if path == "/events":

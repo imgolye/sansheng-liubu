@@ -1,5 +1,52 @@
 # Changelog
 
+## 1.11.0 - 2026-03-14
+
+### Added
+- Added an OpenClaw Control Center inside Mission Control with `/openclaw` and `/api/openclaw` surfaces for native version, schema, gateway, and skills visibility.
+- Added in-product publishing from local repo skills into the current OpenClaw managed skills directory, so owner users can promote a skill without leaving the product.
+- Added managed-skills directory visibility and OpenClaw baseline compatibility signals for `2026.3.12+`.
+
+### Changed
+- Tightened Skills Center to focus on repo-local skills while letting the OpenClaw view own native managed-skill runtime visibility.
+- Upgraded OpenClaw JSON parsing to tolerate mixed CLI output where plugin or warning logs are interleaved with structured JSON.
+
+### Fixed
+- Fixed stale post-action UI state by clearing cached OpenClaw and skill payloads after product mutations such as skill publish, theme switch, or packaging.
+- Fixed deep-link support for the OpenClaw workspace so `/openclaw` now renders like the rest of the product routes.
+- Fixed local publish-state detection to work even when `openclaw skills list --json` truncates discovery on very large managed skill roots.
+
+## 1.10.0 - 2026-03-14
+
+### Added
+- Added `bin/skill_utils.py` to scan, validate, scaffold, and package Claude-style skill folders using Anthropic's published skill structure patterns.
+- Added a new Skills Center product workspace in Mission Control with skill catalog visibility, quality signals, scaffold actions, and zip packaging.
+- Added a sample `mission-control-release-ops` skill to demonstrate progressive disclosure with `references/` and release-oriented workflow guidance.
+
+### Changed
+- Expanded Mission Control from an operations/admin surface into a local skills product as well, with `/skills` and `/api/skills` routes.
+- Wired the dashboard runtime to read skill metadata from the source repository and surface distribution-ready commands directly in the UI.
+
+### Fixed
+- Ensured generated skill scaffolds now pass their first validation instead of emitting malformed YAML frontmatter.
+- Ignored packaged `dist/` artifacts so skill zip creation does not dirty the repository with generated files.
+
+## 1.9.0 - 2026-03-14
+
+### Added
+- Added multi-user Mission Control access with local product accounts, role-based permissions, and Owner Token fallback bootstrap.
+- Added a commercial admin workspace inside Mission Control for seat provisioning, role/state governance, password resets, and audit visibility.
+- Added secure password hashing plus signed session cookies for local product login.
+
+### Changed
+- Split dashboard admin data into public summaries and authenticated sensitive detail, so static snapshots no longer expose seat rosters or audit trails.
+- Elevated Mission Control from a protected local tool to a more commercial-grade product surface with account lifecycle and governance workflows.
+
+### Fixed
+- Restored the missing `now_iso()` helper so account, audit, and session features no longer fail at runtime.
+- Prevented the last active Owner from being downgraded or suspended, avoiding accidental product lockout.
+- Normalized account status handling so suspended seats are enforced consistently across login, admin UI, and stored records.
+
 ## 1.8.0 - 2026-03-14
 
 ### Added

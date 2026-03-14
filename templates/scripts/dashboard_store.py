@@ -10,7 +10,15 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
+MANAGEMENT_STAGE_ORDER = ("intake", "plan", "execute", "verify", "release")
+MANAGEMENT_STAGE_LABELS = {
+    "intake": "需求接入",
+    "plan": "方案编排",
+    "execute": "执行推进",
+    "verify": "验证验收",
+    "release": "发布收口",
+}
 
 
 def now_iso():
@@ -97,9 +105,30 @@ def _ensure_schema(conn):
             updated_at TEXT NOT NULL
         );
 
+        CREATE TABLE IF NOT EXISTS management_runs (
+            run_id TEXT PRIMARY KEY,
+            title TEXT NOT NULL,
+            goal TEXT NOT NULL,
+            owner TEXT NOT NULL,
+            status TEXT NOT NULL,
+            stage_key TEXT NOT NULL,
+            linked_task_id TEXT NOT NULL,
+            linked_agent_id TEXT NOT NULL,
+            linked_session_key TEXT NOT NULL,
+            release_channel TEXT NOT NULL,
+            risk_level TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            started_at TEXT NOT NULL,
+            completed_at TEXT NOT NULL,
+            stages_json TEXT NOT NULL,
+            meta_json TEXT NOT NULL
+        );
+
         CREATE INDEX IF NOT EXISTS idx_audit_events_at ON audit_events(at DESC);
         CREATE INDEX IF NOT EXISTS idx_product_users_created_at ON product_users(created_at);
         CREATE INDEX IF NOT EXISTS idx_product_installations_updated_at ON product_installations(updated_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_management_runs_updated_at ON management_runs(updated_at DESC);
         """
     )
     _set_metadata(conn, "schema_version", str(SCHEMA_VERSION))
@@ -174,6 +203,136 @@ def _normalize_installation_record(record):
         "router_agent_id": str(record.get("routerAgentId") or record.get("router_agent_id") or "").strip(),
         "created_at": created_at,
         "updated_at": updated_at,
+    }
+
+
+def _default_management_stages():
+    stages = []
+    for key in MANAGEMENT_STAGE_ORDER:
+        stages.append(
+            {
+                "key": key,
+                "title": MANAGEMENT_STAGE_LABELS[key],
+                "status": "pending",
+                "note": "",
+                "updatedAt": "",
+            }
+        )
+    stages[0]["status"] = "active"
+    stages[0]["updatedAt"] = now_iso()
+    return stages
+
+
+def _normalize_management_stage(stage, fallback_key):
+    raw_key = str(stage.get("key") or fallback_key or "").strip().lower()
+    key = raw_key if raw_key in MANAGEMENT_STAGE_LABELS else fallback_key
+    status = str(stage.get("status") or "pending").strip().lower()
+    if status not in {"pending", "active", "done", "blocked"}:
+        status = "pending"
+    return {
+        "key": key,
+        "title": str(stage.get("title") or MANAGEMENT_STAGE_LABELS.get(key, key)).strip(),
+        "status": status,
+        "note": str(stage.get("note") or "").strip(),
+        "updatedAt": str(stage.get("updatedAt") or "").strip(),
+    }
+
+
+def _normalize_management_record(record):
+    if not isinstance(record, dict):
+        return None
+    title = str(record.get("title") or "").strip()
+    if not title:
+        return None
+    created_at = str(record.get("createdAt") or record.get("created_at") or now_iso()).strip()
+    updated_at = str(record.get("updatedAt") or record.get("updated_at") or created_at).strip()
+    run_id = str(record.get("id") or record.get("run_id") or secrets.token_hex(6)).strip()
+    current_stage = str(record.get("stageKey") or record.get("stage_key") or "intake").strip().lower()
+    if current_stage not in MANAGEMENT_STAGE_LABELS:
+        current_stage = "intake"
+    status = str(record.get("status") or "active").strip().lower()
+    if status not in {"active", "blocked", "complete"}:
+        status = "active"
+    risk_level = str(record.get("riskLevel") or record.get("risk_level") or "medium").strip().lower()
+    if risk_level not in {"low", "medium", "high"}:
+        risk_level = "medium"
+    stages_input = record.get("stages") if isinstance(record.get("stages"), list) else []
+    stages = []
+    if stages_input:
+        for key in MANAGEMENT_STAGE_ORDER:
+            existing = next(
+                (
+                    stage
+                    for stage in stages_input
+                    if isinstance(stage, dict) and str(stage.get("key") or "").strip().lower() == key
+                ),
+                {"key": key},
+            )
+            stages.append(_normalize_management_stage(existing, key))
+    else:
+        stages = _default_management_stages()
+    active_found = False
+    for stage in stages:
+        if stage["status"] == "active":
+            if active_found:
+                stage["status"] = "pending"
+            else:
+                active_found = True
+                current_stage = stage["key"]
+    if not active_found and status != "complete":
+        for stage in stages:
+            if stage["key"] == current_stage:
+                stage["status"] = "active" if status != "blocked" else "blocked"
+                break
+    meta = record.get("meta") if isinstance(record.get("meta"), dict) else {}
+    return {
+        "run_id": run_id,
+        "title": title,
+        "goal": str(record.get("goal") or "").strip(),
+        "owner": str(record.get("owner") or "Mission Control").strip(),
+        "status": status,
+        "stage_key": current_stage,
+        "linked_task_id": str(record.get("linkedTaskId") or record.get("linked_task_id") or "").strip(),
+        "linked_agent_id": str(record.get("linkedAgentId") or record.get("linked_agent_id") or "").strip(),
+        "linked_session_key": str(record.get("linkedSessionKey") or record.get("linked_session_key") or "").strip(),
+        "release_channel": str(record.get("releaseChannel") or record.get("release_channel") or "manual").strip(),
+        "risk_level": risk_level,
+        "created_at": created_at,
+        "updated_at": updated_at,
+        "started_at": str(record.get("startedAt") or record.get("started_at") or created_at).strip(),
+        "completed_at": str(record.get("completedAt") or record.get("completed_at") or "").strip(),
+        "stages_json": json.dumps(stages, ensure_ascii=False, separators=(",", ":")),
+        "meta_json": json.dumps(meta, ensure_ascii=False, separators=(",", ":")),
+    }
+
+
+def _management_row_to_dict(row):
+    try:
+        stages = json.loads(row["stages_json"] or "[]")
+    except Exception:
+        stages = []
+    try:
+        meta = json.loads(row["meta_json"] or "{}")
+    except Exception:
+        meta = {}
+    return {
+        "id": row["run_id"],
+        "title": row["title"],
+        "goal": row["goal"],
+        "owner": row["owner"],
+        "status": row["status"],
+        "stageKey": row["stage_key"],
+        "linkedTaskId": row["linked_task_id"],
+        "linkedAgentId": row["linked_agent_id"],
+        "linkedSessionKey": row["linked_session_key"],
+        "releaseChannel": row["release_channel"],
+        "riskLevel": row["risk_level"],
+        "createdAt": row["created_at"],
+        "updatedAt": row["updated_at"],
+        "startedAt": row["started_at"],
+        "completedAt": row["completed_at"],
+        "stages": stages,
+        "meta": meta,
     }
 
 
@@ -445,3 +604,158 @@ def load_audit_events(openclaw_dir, limit=80):
             }
         )
     return events
+
+
+def list_management_runs(openclaw_dir, limit=32):
+    with _connect(openclaw_dir) as conn:
+        rows = conn.execute(
+            """
+            SELECT
+                run_id, title, goal, owner, status, stage_key, linked_task_id, linked_agent_id,
+                linked_session_key, release_channel, risk_level, created_at, updated_at,
+                started_at, completed_at, stages_json, meta_json
+            FROM management_runs
+            ORDER BY updated_at DESC, created_at DESC
+            LIMIT ?
+            """,
+            (max(int(limit or 0), 1),),
+        ).fetchall()
+    return [_management_row_to_dict(row) for row in rows]
+
+
+def create_management_run(openclaw_dir, payload):
+    normalized = _normalize_management_record(payload)
+    if not normalized:
+        raise RuntimeError("management run title is required")
+    with _connect(openclaw_dir) as conn:
+        conn.execute(
+            """
+            INSERT INTO management_runs(
+                run_id, title, goal, owner, status, stage_key, linked_task_id, linked_agent_id,
+                linked_session_key, release_channel, risk_level, created_at, updated_at,
+                started_at, completed_at, stages_json, meta_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                normalized["run_id"],
+                normalized["title"],
+                normalized["goal"],
+                normalized["owner"],
+                normalized["status"],
+                normalized["stage_key"],
+                normalized["linked_task_id"],
+                normalized["linked_agent_id"],
+                normalized["linked_session_key"],
+                normalized["release_channel"],
+                normalized["risk_level"],
+                normalized["created_at"],
+                normalized["updated_at"],
+                normalized["started_at"],
+                normalized["completed_at"],
+                normalized["stages_json"],
+                normalized["meta_json"],
+            ),
+        )
+        conn.commit()
+    return next((item for item in list_management_runs(openclaw_dir, limit=64) if item["id"] == normalized["run_id"]), None)
+
+
+def update_management_run(openclaw_dir, run_id, action, note="", risk_level="", linked_task_id=""):
+    run_id = str(run_id or "").strip()
+    if not run_id:
+        raise RuntimeError("management run id is required")
+    with _connect(openclaw_dir) as conn:
+        row = conn.execute(
+            """
+            SELECT
+                run_id, title, goal, owner, status, stage_key, linked_task_id, linked_agent_id,
+                linked_session_key, release_channel, risk_level, created_at, updated_at,
+                started_at, completed_at, stages_json, meta_json
+            FROM management_runs
+            WHERE run_id = ?
+            """,
+            (run_id,),
+        ).fetchone()
+        if not row:
+            raise RuntimeError(f"management run not found: {run_id}")
+        record = _management_row_to_dict(row)
+        stages = record["stages"] or _default_management_stages()
+        stage_index = next((idx for idx, stage in enumerate(stages) if stage["key"] == record["stageKey"]), 0)
+        current_stage = stages[stage_index]
+        if note:
+            current_stage["note"] = str(note).strip()
+            current_stage["updatedAt"] = now_iso()
+        if linked_task_id:
+            record["linkedTaskId"] = str(linked_task_id).strip()
+        if risk_level:
+            level = str(risk_level).strip().lower()
+            if level in {"low", "medium", "high"}:
+                record["riskLevel"] = level
+        action = str(action or "").strip().lower()
+        now = now_iso()
+        if action == "advance":
+            current_stage["status"] = "done"
+            current_stage["updatedAt"] = now
+            if stage_index + 1 < len(stages):
+                next_stage = stages[stage_index + 1]
+                if next_stage["status"] != "done":
+                    next_stage["status"] = "active"
+                    next_stage["updatedAt"] = now
+                record["stageKey"] = next_stage["key"]
+                record["status"] = "active"
+            else:
+                record["stageKey"] = stages[-1]["key"]
+                record["status"] = "complete"
+                record["completedAt"] = now
+        elif action == "block":
+            current_stage["status"] = "blocked"
+            current_stage["updatedAt"] = now
+            record["status"] = "blocked"
+        elif action == "resume":
+            current_stage["status"] = "active"
+            current_stage["updatedAt"] = now
+            record["status"] = "active"
+        elif action == "complete":
+            for stage in stages:
+                stage["status"] = "done"
+                stage["updatedAt"] = now
+            record["stageKey"] = stages[-1]["key"]
+            record["status"] = "complete"
+            record["completedAt"] = now
+        elif action == "note":
+            pass
+        else:
+            raise RuntimeError(f"unsupported management action: {action}")
+        record["updatedAt"] = now
+        record["stages"] = stages
+        normalized = _normalize_management_record(record)
+        conn.execute(
+            """
+            UPDATE management_runs
+            SET
+                title = ?, goal = ?, owner = ?, status = ?, stage_key = ?, linked_task_id = ?, linked_agent_id = ?,
+                linked_session_key = ?, release_channel = ?, risk_level = ?, updated_at = ?, started_at = ?,
+                completed_at = ?, stages_json = ?, meta_json = ?
+            WHERE run_id = ?
+            """,
+            (
+                normalized["title"],
+                normalized["goal"],
+                normalized["owner"],
+                normalized["status"],
+                normalized["stage_key"],
+                normalized["linked_task_id"],
+                normalized["linked_agent_id"],
+                normalized["linked_session_key"],
+                normalized["release_channel"],
+                normalized["risk_level"],
+                normalized["updated_at"],
+                normalized["started_at"],
+                normalized["completed_at"],
+                normalized["stages_json"],
+                normalized["meta_json"],
+                run_id,
+            ),
+        )
+        conn.commit()
+    return next((item for item in list_management_runs(openclaw_dir, limit=64) if item["id"] == run_id), None)

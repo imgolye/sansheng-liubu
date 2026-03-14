@@ -7,7 +7,9 @@ export const STATUS_COLOR = {
   standby: "default",
   idle: "default",
   done: "success",
+  complete: "success",
   ready: "success",
+  pending: "default",
   warning: "warning",
   error: "error",
 };

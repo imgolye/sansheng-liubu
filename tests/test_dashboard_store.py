@@ -138,6 +138,55 @@ class DashboardStoreTests(unittest.TestCase):
             )
             self.assertEqual(len(dashboard_store.load_product_installations(openclaw_dir)), 1)
 
+    def test_management_run_lifecycle(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            openclaw_dir = Path(tmpdir)
+
+            created = dashboard_store.create_management_run(
+                openclaw_dir,
+                {
+                    "title": "商城交付闭环",
+                    "goal": "从需求到发布一路可追踪",
+                    "owner": "Ops Lead",
+                    "linkedTaskId": "TASK-001",
+                    "riskLevel": "high",
+                },
+            )
+            self.assertEqual(created["stageKey"], "intake")
+            self.assertEqual(created["stages"][0]["status"], "active")
+
+            advanced = dashboard_store.update_management_run(
+                openclaw_dir,
+                created["id"],
+                "advance",
+                note="需求已完成对齐",
+            )
+            self.assertEqual(advanced["stageKey"], "plan")
+            self.assertEqual(advanced["stages"][0]["status"], "done")
+            self.assertEqual(advanced["stages"][1]["status"], "active")
+
+            blocked = dashboard_store.update_management_run(
+                openclaw_dir,
+                created["id"],
+                "block",
+                note="等待联调环境",
+            )
+            self.assertEqual(blocked["status"], "blocked")
+            self.assertEqual(blocked["stages"][1]["status"], "blocked")
+
+            resumed = dashboard_store.update_management_run(
+                openclaw_dir,
+                created["id"],
+                "resume",
+                note="联调环境已恢复",
+            )
+            self.assertEqual(resumed["status"], "active")
+            self.assertEqual(resumed["stages"][1]["status"], "active")
+
+            completed = dashboard_store.update_management_run(openclaw_dir, created["id"], "complete")
+            self.assertEqual(completed["status"], "complete")
+            self.assertTrue(completed["completedAt"])
+
 
 if __name__ == "__main__":
     unittest.main()

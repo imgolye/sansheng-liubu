@@ -58,16 +58,20 @@ fi
 echo "[*] 同步运行时资源到: $OPENCLAW_DIR"
 echo "[*] 仓库目录: $PROJECT_DIR"
 
-python3 - "$CONFIG_PATH" "$PROJECT_DIR" <<'PY'
+PYTHONPATH="$PROJECT_DIR/bin${PYTHONPATH:+:$PYTHONPATH}" python3 - "$OPENCLAW_DIR" "$PROJECT_DIR" <<'PY'
 import json, sys
 from pathlib import Path
 
-config_path = Path(sys.argv[1])
+from project_metadata import load_project_metadata, sanitize_openclaw_config, write_project_metadata
+
+openclaw_dir = Path(sys.argv[1]).resolve()
 project_dir = str(Path(sys.argv[2]).resolve())
+config_path = openclaw_dir / "openclaw.json"
 config = json.loads(config_path.read_text())
-config.setdefault("sanshengLiubu", {})
-config["sanshengLiubu"]["projectDir"] = project_dir
-config_path.write_text(json.dumps(config, ensure_ascii=False, indent=2) + "\n")
+metadata = load_project_metadata(openclaw_dir, existing_config=config)
+metadata["projectDir"] = project_dir
+write_project_metadata(openclaw_dir, metadata)
+config_path.write_text(json.dumps(sanitize_openclaw_config(config), ensure_ascii=False, indent=2) + "\n")
 PY
 
 WORKSPACES=()

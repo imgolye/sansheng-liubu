@@ -7,12 +7,14 @@ import argparse
 import json
 import subprocess
 import shutil
+import stat
 from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
 from generate_config import load_existing_config, write_config
+from project_metadata import load_project_metadata
 from render_templates import render_theme
 from theme_utils import (
     DEPARTMENT_KEYS,
@@ -39,6 +41,7 @@ RUNTIME_SCRIPTS = (
 )
 GENERATED_ROOT_FILES = {"SOUL.md", "HEARTBEAT.md"}
 GENERATED_DIRS = {"scripts", "shared-context"}
+SKIP_MERGE_NAMES = {".git", ".hg", ".svn", "__pycache__"}
 
 
 def semantic_keys():
@@ -59,7 +62,7 @@ def backup_installation(openclaw_dir, current_theme_name, target_theme_name):
     backup_dir = openclaw_dir / "backups" / f"theme-switch-{timestamp()}"
     backup_dir.mkdir(parents=True, exist_ok=False)
 
-    for filename in ("openclaw.json", ".env"):
+    for filename in ("openclaw.json", ".env", "sansheng-liubu.json"):
         source = openclaw_dir / filename
         if source.exists():
             shutil.copy2(source, backup_dir / filename)
@@ -97,11 +100,32 @@ def merge_tree(source, target):
         return
     if source.resolve() == target.resolve():
         return
-    if source.is_dir():
-        shutil.copytree(source, target, dirs_exist_ok=True)
-    else:
+    if source.is_symlink():
         target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(source, target)
+        if target.exists() or target.is_symlink():
+            if target.is_dir() and not target.is_symlink():
+                shutil.rmtree(target)
+            else:
+                target.unlink()
+        target.symlink_to(source.readlink())
+        return
+    if source.is_dir():
+        if source.name in SKIP_MERGE_NAMES:
+            return
+        target.mkdir(parents=True, exist_ok=True)
+        for entry in source.iterdir():
+            merge_tree(entry, target / entry.name)
+        return
+
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if target.is_symlink():
+        target.unlink()
+    elif target.exists():
+        try:
+            target.chmod(target.stat().st_mode | stat.S_IWUSR)
+        except OSError:
+            pass
+    shutil.copy2(source, target)
 
 
 def translate_path_references(value, old_to_new_agent_ids):
@@ -229,8 +253,7 @@ def migrate_agent_state(openclaw_dir, old_theme, new_theme):
         migrate_workspace(old_workspace, new_workspace, old_theme, new_theme, old_to_new_agent_ids)
 
 
-def build_generate_args(openclaw_dir, theme_file, existing_config, task_prefix_override):
-    metadata = existing_config.get("sanshengLiubu", {})
+def build_generate_args(openclaw_dir, theme_file, existing_config, metadata, task_prefix_override):
     return SimpleNamespace(
         theme=str(theme_file),
         openclaw_dir=str(openclaw_dir),
@@ -265,7 +288,8 @@ def main():
         raise SystemExit(f"Unknown theme: {args.theme}")
 
     existing_config = load_existing_config(config_path)
-    current_theme_name = infer_theme_name_from_config(existing_config, THEMES_DIR)
+    metadata = load_project_metadata(openclaw_dir, existing_config=existing_config)
+    current_theme_name = metadata.get("theme") or infer_theme_name_from_config(existing_config, THEMES_DIR)
     new_theme = load_theme(theme_file)
     old_theme = load_theme(THEMES_DIR / current_theme_name / "theme.json") if current_theme_name else None
 
@@ -276,13 +300,9 @@ def main():
         migrate_agent_state(openclaw_dir, old_theme, new_theme)
 
     deploy_runtime_scripts(openclaw_dir, new_theme)
-    render_theme(
-        new_theme,
-        openclaw_dir,
-        args.task_prefix or existing_config.get("sanshengLiubu", {}).get("taskPrefix") or new_theme.get("task_prefix", "JJC"),
-    )
+    render_theme(new_theme, openclaw_dir, args.task_prefix or metadata.get("taskPrefix") or new_theme.get("task_prefix", "JJC"))
 
-    generate_args = build_generate_args(openclaw_dir, theme_file, existing_config, args.task_prefix)
+    generate_args = build_generate_args(openclaw_dir, theme_file, existing_config, metadata, args.task_prefix)
     write_config(new_theme, generate_args, existing_config=existing_config)
 
     dashboard_script = openclaw_dir / f"workspace-{get_agent_id_map_by_semantic(new_theme)['router']}" / "scripts" / "collaboration_dashboard.py"

@@ -159,7 +159,15 @@ import json, sys
 from pathlib import Path
 
 config_path = Path(sys.argv[1])
-if config_path.exists():
+openclaw_dir = config_path.parent
+sidecar = openclaw_dir / "sansheng-liubu.json"
+if sidecar.exists():
+    try:
+        metadata = json.loads(sidecar.read_text())
+        print(metadata.get("projectDir", ""))
+    except Exception:
+        pass
+elif config_path.exists():
     config = json.loads(config_path.read_text())
     print(config.get("sanshengLiubu", {}).get("projectDir", ""))
 PY

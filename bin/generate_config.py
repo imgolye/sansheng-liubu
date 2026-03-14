@@ -10,6 +10,7 @@ from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
 
+from project_metadata import extract_legacy_metadata, sanitize_openclaw_config, write_project_metadata
 from theme_utils import load_theme
 
 
@@ -59,7 +60,7 @@ def resolve_light_model(args, existing_config):
 def resolve_task_prefix(args, existing_config, theme):
     if args.task_prefix:
         return args.task_prefix
-    metadata = existing_config.get("sanshengLiubu", {})
+    metadata = extract_legacy_metadata(existing_config)
     existing_prefix = metadata.get("taskPrefix")
     if existing_prefix:
         return existing_prefix
@@ -69,7 +70,7 @@ def resolve_task_prefix(args, existing_config, theme):
 def resolve_project_dir(args, existing_config):
     if getattr(args, "project_dir", ""):
         return str(Path(args.project_dir).expanduser().resolve())
-    metadata = existing_config.get("sanshengLiubu", {})
+    metadata = extract_legacy_metadata(existing_config)
     project_dir = metadata.get("projectDir")
     if project_dir:
         return str(Path(project_dir).expanduser().resolve())
@@ -313,14 +314,6 @@ def build_generated_config(theme, args, existing_config=None):
     )
 
     generated = {
-        "sanshengLiubu": {
-            "version": PROJECT_VERSION,
-            "theme": theme["name"],
-            "displayName": theme["display_name"],
-            "taskPrefix": task_prefix,
-            "projectDir": project_dir,
-            "generatedAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-        },
         "agents": {
             "defaults": {
                 "model": {
@@ -382,7 +375,7 @@ def build_generated_config(theme, args, existing_config=None):
     }
 
     if existing_config:
-        return deep_merge(existing_config, generated)
+        return sanitize_openclaw_config(deep_merge(existing_config, generated))
     return generated
 
 
@@ -391,6 +384,17 @@ def write_config(theme, args, existing_config=None):
     config_path = Path(args.openclaw_dir) / "openclaw.json"
     with open(config_path, "w", encoding="utf-8") as f:
         json.dump(config, f, ensure_ascii=False, indent=2)
+    write_project_metadata(
+        args.openclaw_dir,
+        {
+            "version": PROJECT_VERSION,
+            "theme": theme["name"],
+            "displayName": theme["display_name"],
+            "taskPrefix": resolve_task_prefix(args, existing_config or {}, theme),
+            "projectDir": resolve_project_dir(args, existing_config or {}),
+            "generatedAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        },
+    )
     print(f"Generated {config_path} with {len(config.get('agents', {}).get('list', []))} agents")
     return config
 

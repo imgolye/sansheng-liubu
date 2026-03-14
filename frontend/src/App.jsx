@@ -18,6 +18,7 @@ import {
   ApartmentOutlined,
   CommentOutlined,
   DashboardOutlined,
+  DeploymentUnitOutlined,
   LogoutOutlined,
   ReloadOutlined,
   SettingOutlined,
@@ -34,6 +35,7 @@ const { Title, Paragraph, Text } = Typography;
 
 const LoginPage = lazy(() => import("./LoginPage"));
 const OverviewView = lazy(() => import("./views/OverviewView"));
+const ManagementView = lazy(() => import("./views/ManagementView"));
 const AgentsView = lazy(() => import("./views/AgentsView"));
 const TasksView = lazy(() => import("./views/TasksView"));
 const ConversationsView = lazy(() => import("./views/ConversationsView"));
@@ -48,6 +50,7 @@ const CreateTaskModal = lazy(() => import("./components/CreateTaskModal"));
 
 const MENU_ITEMS = [
   { key: "/overview", icon: <DashboardOutlined />, label: "总览" },
+  { key: "/management", icon: <DeploymentUnitOutlined />, label: "端到端管理" },
   { key: "/agents", icon: <TeamOutlined />, label: "Agent 运营" },
   { key: "/tasks", icon: <UnorderedListOutlined />, label: "交付执行" },
   { key: "/conversations", icon: <CommentOutlined />, label: "会话中心" },
@@ -257,6 +260,16 @@ function App() {
     switch (currentPath) {
       case "/agents":
         return <AgentsView {...viewProps} onSelectAgent={setSelectedAgentId} />;
+      case "/management":
+        return (
+          <ManagementView
+            {...viewProps}
+            onCreateRun={(values) => runAction("/api/actions/management/run/create", values)}
+            onUpdateRun={(values) => runAction("/api/actions/management/run/update", values)}
+            onSelectTask={setSelectedTaskId}
+            onOpenConversation={openConversation}
+          />
+        );
       case "/tasks":
         return <TasksView {...viewProps} onOpenCreateTask={() => setCreateTaskOpen(true)} onSelectTask={setSelectedTaskId} />;
       case "/conversations":

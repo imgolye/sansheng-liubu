@@ -23,12 +23,15 @@ from urllib.parse import parse_qs, quote, urlsplit
 
 from dashboard_store import (
     append_audit_event as store_append_audit_event,
+    create_management_run as store_create_management_run,
     delete_product_installation as store_delete_product_installation,
+    list_management_runs as store_list_management_runs,
     load_audit_events as store_load_audit_events,
     load_product_installations as store_load_product_installations,
     load_product_users as store_load_product_users,
     save_product_users as store_save_product_users,
     store_path as dashboard_store_path,
+    update_management_run as store_update_management_run,
     upsert_product_installation as store_upsert_product_installation,
 )
 
@@ -5944,6 +5947,44 @@ def load_config(openclaw_dir):
     return load_json(Path(openclaw_dir) / "openclaw.json", {})
 
 
+def legacy_project_metadata(config):
+    metadata = config.get("sanshengLiubu", {}) if isinstance(config, dict) else {}
+    return deepcopy(metadata) if isinstance(metadata, dict) else {}
+
+
+def project_metadata_path(openclaw_dir):
+    return Path(openclaw_dir) / "sansheng-liubu.json"
+
+
+def infer_theme_name_from_agents(config):
+    agent_ids = {agent.get("id") for agent in load_agents(config) if isinstance(agent, dict)}
+    if "assistant" in agent_ids:
+        return "corporate"
+    if "secretary" in agent_ids:
+        return "startup"
+    if "taizi" in agent_ids:
+        return "imperial"
+    return "imperial"
+
+
+def load_project_metadata(openclaw_dir, config=None):
+    path = project_metadata_path(openclaw_dir)
+    data = load_json(path, {})
+    config = config or load_config(openclaw_dir)
+    legacy = legacy_project_metadata(config)
+    if isinstance(data, dict) and data:
+        return {**legacy, **data}
+    if legacy:
+        return legacy
+    inferred_theme = infer_theme_name_from_agents(config)
+    return {
+        "theme": inferred_theme,
+        "displayName": THEME_CATALOG.get(inferred_theme, {}).get("displayName", inferred_theme),
+        "projectDir": "",
+        "taskPrefix": "",
+    }
+
+
 def load_agents(config):
     return config.get("agents", {}).get("list", [])
 
@@ -6434,12 +6475,13 @@ def status_for_agent(active_count, blocked_count, signal_dt, last_seen, now):
 def build_dashboard_data(openclaw_dir):
     openclaw_dir = Path(openclaw_dir)
     config = load_config(openclaw_dir)
+    metadata = load_project_metadata(openclaw_dir, config=config)
     agents = load_agents(config)
     router_agent_id = get_router_agent_id(config)
     kanban_cfg = load_kanban_config(openclaw_dir, router_agent_id)
     now = now_utc()
     tasks = merge_tasks(openclaw_dir, config)
-    theme_name = config.get("sanshengLiubu", {}).get("theme", "imperial")
+    theme_name = metadata.get("theme", "imperial")
     theme_style = THEME_STYLES.get(theme_name, THEME_STYLES["imperial"])
 
     agent_labels, label_to_agent_ids = build_label_maps(agents, kanban_cfg, router_agent_id)
@@ -6695,6 +6737,7 @@ def build_dashboard_data(openclaw_dir):
     conversation_data = load_conversation_catalog(openclaw_dir, config, agent_labels)
     skills_data = load_skills_catalog(openclaw_dir, config=config)
     openclaw_data = load_openclaw_control_data(openclaw_dir)
+    management_data = build_management_data(openclaw_dir, task_index, conversation_data, deliverables, now)
     native_skill_names = set(openclaw_data.pop("_nativeSkillNames", []))
     managed_skills_root = str((openclaw_data.get("nativeSkills", {}) or {}).get("managedSkillsDir", "") or "").strip()
     managed_skills_dir = Path(managed_skills_root).expanduser() if managed_skills_root else None
@@ -6717,7 +6760,7 @@ def build_dashboard_data(openclaw_dir):
         "routerAgentId": router_agent_id,
         "theme": {
             "name": theme_name,
-            "displayName": config.get("sanshengLiubu", {}).get("displayName", theme_name),
+            "displayName": metadata.get("displayName", theme_name),
             "styles": theme_style,
         },
         "themeCatalog": theme_catalog,
@@ -6730,6 +6773,7 @@ def build_dashboard_data(openclaw_dir):
         "relays": relays,
         "commands": product_commands,
         "admin": admin_data,
+        "management": management_data,
         "conversations": conversation_data,
         "skills": skills_data,
         "openclaw": openclaw_data,
@@ -7024,7 +7068,7 @@ def load_audit_events(openclaw_dir, limit=80):
 
 
 def default_installation_label(config, openclaw_dir):
-    metadata = config.get("sanshengLiubu", {})
+    metadata = load_project_metadata(openclaw_dir, config=config)
     theme_name = metadata.get("theme", "imperial")
     return (
         metadata.get("displayName")
@@ -7036,7 +7080,7 @@ def default_installation_label(config, openclaw_dir):
 
 def sync_current_installation_registry(openclaw_dir, config):
     resolved_dir = str(Path(openclaw_dir).expanduser().resolve())
-    metadata = config.get("sanshengLiubu", {})
+    metadata = load_project_metadata(openclaw_dir, config=config)
     return store_upsert_product_installation(
         openclaw_dir,
         {
@@ -7081,7 +7125,8 @@ def summarize_installation_record(current_openclaw_dir, installation, now):
         return summary
     try:
         config = load_config(openclaw_path)
-        theme_name = config.get("sanshengLiubu", {}).get("theme", "") or summary["theme"] or "imperial"
+        metadata = load_project_metadata(openclaw_path, config=config)
+        theme_name = metadata.get("theme", "") or summary["theme"] or "imperial"
         tasks = merge_tasks(openclaw_path, config)
         active_tasks = 0
         blocked_tasks = 0
@@ -7098,8 +7143,8 @@ def summarize_installation_record(current_openclaw_dir, installation, now):
         updated_at = generated_at or installation.get("updatedAt", "")
         summary.update(
             {
-                "label": config.get("sanshengLiubu", {}).get("displayName") or summary["label"],
-                "projectDir": config.get("sanshengLiubu", {}).get("projectDir", "") or summary["projectDir"],
+                "label": metadata.get("displayName") or summary["label"],
+                "projectDir": metadata.get("projectDir", "") or summary["projectDir"],
                 "theme": theme_name,
                 "themeLabel": THEME_CATALOG.get(theme_name, {}).get("displayName", theme_name),
                 "routerAgentId": get_router_agent_id(config),
@@ -7135,7 +7180,7 @@ def register_installation(openclaw_dir, target_dir, label=""):
     config = load_config(resolved)
     if not load_agents(config):
         raise RuntimeError("该安装目录的 openclaw.json 没有可识别的 agents。")
-    metadata = config.get("sanshengLiubu", {})
+    metadata = load_project_metadata(resolved, config=config)
     theme_name = metadata.get("theme", "imperial")
     entry = store_upsert_product_installation(
         openclaw_dir,
@@ -7205,7 +7250,7 @@ def build_admin_data(openclaw_dir, config, now, include_sensitive=True):
         }
         for role, meta in USER_ROLES.items()
     ]
-    metadata = config.get("sanshengLiubu", {})
+    metadata = load_project_metadata(openclaw_dir, config=config)
     return {
         "workspace": {
             "displayName": metadata.get("displayName") or metadata.get("theme", "Mission Control"),
@@ -7283,7 +7328,8 @@ def resolve_project_dir(openclaw_dir, config=None):
             return candidate
 
     config = config or load_config(openclaw_dir)
-    project_dir = str(config.get("sanshengLiubu", {}).get("projectDir", "")).strip()
+    metadata = load_project_metadata(openclaw_dir, config=config)
+    project_dir = str(metadata.get("projectDir", "")).strip()
     if project_dir:
         candidate = Path(project_dir).expanduser().resolve()
         if (candidate / "bin" / "switch_theme.py").exists():
@@ -7752,6 +7798,53 @@ def load_openclaw_control_data(openclaw_dir):
     return cached_payload(("openclaw-control", str(openclaw_dir)), 30, build)
 
 
+def build_management_data(openclaw_dir, task_index, conversation_data, deliverables, now):
+    task_map = {item.get("id"): item for item in task_index if item.get("id")}
+    deliverable_map = {item.get("id"): item for item in deliverables if item.get("id")}
+    session_map = {
+        item.get("key"): item
+        for item in (conversation_data.get("sessions", []) if isinstance(conversation_data, dict) else [])
+        if item.get("key")
+    }
+    runs = []
+    stage_counter = Counter()
+    status_counter = Counter()
+    risk_counter = Counter()
+    for run in store_list_management_runs(openclaw_dir, limit=48):
+        current_stage = next(
+            (stage for stage in run.get("stages", []) if stage.get("key") == run.get("stageKey")),
+            {},
+        )
+        stage_counter[run.get("stageKey", "unknown")] += 1
+        status_counter[run.get("status", "active")] += 1
+        risk_counter[run.get("riskLevel", "medium")] += 1
+        runs.append(
+            {
+                **run,
+                "updatedAgo": format_age(parse_iso(run.get("updatedAt")), now),
+                "createdAgo": format_age(parse_iso(run.get("createdAt")), now),
+                "stageLabel": current_stage.get("title") or run.get("stageKey", ""),
+                "stageStatus": current_stage.get("status") or ("done" if run.get("status") == "complete" else run.get("status")),
+                "linkedTask": task_map.get(run.get("linkedTaskId")),
+                "linkedSession": session_map.get(run.get("linkedSessionKey")),
+                "deliverable": deliverable_map.get(run.get("linkedTaskId")),
+            }
+        )
+    return {
+        "summary": {
+            "total": len(runs),
+            "active": sum(1 for item in runs if item.get("status") == "active"),
+            "blocked": sum(1 for item in runs if item.get("status") == "blocked"),
+            "readyForRelease": sum(1 for item in runs if item.get("stageKey") == "release" and item.get("status") != "complete"),
+            "completed": sum(1 for item in runs if item.get("status") == "complete"),
+            "statusBreakdown": dict(status_counter),
+            "stageBreakdown": dict(stage_counter),
+            "riskBreakdown": dict(risk_counter),
+        },
+        "runs": runs,
+    }
+
+
 def perform_skill_scaffold(
     openclaw_dir,
     slug,
@@ -7884,7 +7977,8 @@ def guess_content_type(path):
 
 def render_login_html(openclaw_dir, next_path="/", error_message=""):
     config = load_config(openclaw_dir)
-    theme_name = config.get("sanshengLiubu", {}).get("theme", "imperial")
+    metadata = load_project_metadata(openclaw_dir, config=config)
+    theme_name = metadata.get("theme", "imperial")
     theme_style = THEME_STYLES.get(theme_name, THEME_STYLES["imperial"])
     theme_meta = THEME_CATALOG.get(theme_name, THEME_CATALOG["imperial"])
     router_agent_id = get_router_agent_id(config)
@@ -7955,6 +8049,7 @@ class CollaborationDashboardHandler(BaseHTTPRequestHandler):
         "/",
         "/login",
         "/overview",
+        "/management",
         "/agents",
         "/tasks",
         "/conversations",
@@ -8448,6 +8543,73 @@ class CollaborationDashboardHandler(BaseHTTPRequestHandler):
                         "ok": True,
                         "message": f"任务 {task_id} 已完成并归档到交付列表。",
                         "taskId": task_id,
+                        "dashboard": data,
+                    }
+                )
+                return
+
+            if path == "/api/actions/management/run/create":
+                if not self._require_capability("taskWrite", "当前账号没有创建端到端管理 Run 的权限。"):
+                    return
+                title = str(payload.get("title", "")).strip()
+                if not title:
+                    raise RuntimeError("管理 Run 标题不能为空。")
+                owner = str(payload.get("owner", "")).strip() or session_for_client(self._session()).get("displayName", "Mission Control")
+                run = store_create_management_run(
+                    self.server.openclaw_dir,
+                    {
+                        "title": title,
+                        "goal": str(payload.get("goal", "")).strip(),
+                        "owner": owner,
+                        "linkedTaskId": str(payload.get("linkedTaskId", "")).strip(),
+                        "linkedAgentId": str(payload.get("linkedAgentId", "")).strip(),
+                        "linkedSessionKey": str(payload.get("linkedSessionKey", "")).strip(),
+                        "releaseChannel": str(payload.get("releaseChannel", "")).strip() or "manual",
+                        "riskLevel": str(payload.get("riskLevel", "")).strip() or "medium",
+                    },
+                )
+                self._audit(
+                    "management_run_create",
+                    detail=f"创建端到端管理 Run {run['title']}",
+                    meta={"runId": run["id"], "linkedTaskId": run.get("linkedTaskId", "")},
+                )
+                data, _paths = self._refreshed_bundle()
+                self._send_json(
+                    {
+                        "ok": True,
+                        "message": f"端到端管理 Run {run['title']} 已建立。",
+                        "run": run,
+                        "dashboard": data,
+                    }
+                )
+                return
+
+            if path == "/api/actions/management/run/update":
+                if not self._require_capability("taskWrite", "当前账号没有推进端到端管理 Run 的权限。"):
+                    return
+                run_id = str(payload.get("runId", "")).strip()
+                action = str(payload.get("action", "")).strip().lower()
+                if not run_id or not action:
+                    raise RuntimeError("请提供 Run 编号和动作。")
+                run = store_update_management_run(
+                    self.server.openclaw_dir,
+                    run_id,
+                    action,
+                    note=str(payload.get("note", "")).strip(),
+                    risk_level=str(payload.get("riskLevel", "")).strip(),
+                    linked_task_id=str(payload.get("linkedTaskId", "")).strip(),
+                )
+                self._audit(
+                    "management_run_update",
+                    detail=f"更新端到端管理 Run {run_id}",
+                    meta={"runId": run_id, "action": action, "stageKey": run.get("stageKey", "")},
+                )
+                data, _paths = self._refreshed_bundle()
+                self._send_json(
+                    {
+                        "ok": True,
+                        "message": f"端到端管理 Run {run.get('title', run_id)} 已更新。",
+                        "run": run,
                         "dashboard": data,
                     }
                 )

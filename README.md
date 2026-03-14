@@ -21,6 +21,7 @@ python3 ~/.openclaw/workspace-your-router-id/scripts/collaboration_dashboard.py 
 - 全局搜索更顺滑：Agent、任务、会话统一搜索改成延迟过滤，数据量变大时输入不会明显拖住页面
 - Ant Design 产品壳：左侧菜单导航、顶部控制条、表格工作台、抽屉详情和后台操作面统一改成企业后台语义
 - 商业化首屏：登录页、产品壳和总览页已经重做成更偏控制平面产品的布局，不再像开发后台默认界面
+- 真正的数据可视化：Overview 现在有任务漏斗、Agent 负载图和 24h 活动趋势，Activity 里也补了接力网络图
 - 安装舰队：商业后台新增多实例注册与可视化视图，开始把多套本地 OpenClaw 安装收进同一个控制平面
 - 实例登记：Owner 可以登记其他本机 OpenClaw 目录，系统会自动读取其主题、路由 Agent、任务量和实例健康状态
 - 产品数据内核：新增 `dashboard_store.py`，账号和审计优先走 SQLite 存储层，并兼容旧版 JSON / JSONL 自动迁移
@@ -44,6 +45,7 @@ python3 ~/.openclaw/workspace-your-router-id/scripts/collaboration_dashboard.py 
 - 多模块 Mission Control：总览、Agent 运营、交付执行、活动时间线、主题中心
 - 本地实时 Web 应用：`--serve` 会启动带 SSE 推送的常驻产品面板
 - 本地登录：先访问 `/login`，通过签名 cookie 会话进入受保护的产品界面
+- 中英双语和离线快照：前端支持跟随主题语言切换，并在短时断网时继续显示最近一次成功同步的 dashboard 快照
 - 深链接路由：`/agents`、`/tasks`、`/conversations`、`/activity`、`/themes`、`/skills`、`/openclaw`、`/admin`
 - 本地 API：`/api/agents`、`/api/tasks`、`/api/conversations`、`/api/conversations/transcript`、`/api/events`、`/api/themes`、`/api/skills`、`/api/openclaw`、`/api/deliverables`、`/api/admin`
 - 可调布局：支持收起菜单，并在运营 / 聚焦 / 紧凑三种布局间切换

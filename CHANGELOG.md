@@ -7,6 +7,8 @@
 - Added JSON auth endpoints for the new frontend, including `/api/auth/session`, `/api/auth/login`, and `/api/auth/logout`.
 - Added frontend-aware serving mode to `collaboration_dashboard.py`, with automatic `frontend/dist` detection, SPA route support, and `/legacy` fallback for the previous monolithic dashboard.
 - Added `bin/build_frontend.sh` and `bin/sync_runtime_assets.sh` so existing installs can build the new SPA and sync runtime assets without rerunning the full interactive installer.
+- Added chart-driven overview analytics with a task funnel, agent load distribution, and 24-hour activity trend rendered directly inside the React Mission Control shell.
+- Added a relay network visualization to the Activity workspace plus a card/table toggle in Agent Ops so operators can scan coordination and load in more than one view.
 
 ### Changed
 - Promoted the local product from a server-rendered single-file console into an API-first backend plus independent frontend architecture.
@@ -14,6 +16,8 @@
 - Split the new React frontend by route and moved drawers/modals behind lazy-loaded secondary chunks, reducing the largest shared frontend bundle from roughly `917 kB` to about `581 kB` in production build output.
 - Deferred global search filtering in the React shell so typing across agent, task, and conversation datasets stays responsive under larger local runtimes.
 - Reframed the login screen, product shell, and overview workspace into a more commercial control-plane layout with stronger brand hierarchy, operator summary surfaces, and executive-facing first-screen presentation.
+- Added theme-aware frontend language switching and localized the new overview, activity, and agent visualization surfaces for Chinese and English themes.
+- Added offline snapshot fallback for `/api/dashboard` so the product can keep rendering the latest local operational picture even when the live runtime is temporarily unavailable.
 - Updated setup/runtime version metadata to `1.16.0`.
 
 ## 1.15.0 - 2026-03-14

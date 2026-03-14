@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.4.0 - 2026-03-14
+
+### Added
+- Added a live local web panel for the collaboration dashboard with `/api/dashboard` and Server-Sent Events (`/events`) endpoints.
+- Added real-time client-side updates for the mission-control UI without full-page reloads.
+
+### Changed
+- Upgraded `collaboration_dashboard.py --serve` from static file hosting to a real-time local dashboard server.
+- Updated collaboration dashboard signatures so change events only fire on substantive task/agent updates.
+
+### Fixed
+- Avoided noisy continuous dashboard events caused by timestamp-only changes.
+- Preserved static snapshot generation while enabling a live browser panel for the same dashboard.
+
 ## 1.3.0 - 2026-03-14
 
 ### Added

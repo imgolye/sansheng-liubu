@@ -4,17 +4,17 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
-from collections import Counter, defaultdict
+import time
+from collections import Counter
 from datetime import datetime, timedelta, timezone
-from functools import partial
-from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 
 TERMINAL_STATES = {"done", "cancelled", "canceled"}
-ACTIVE_STATES = {"assigned", "doing", "review", "pending", "menxia", "zhongshu", "taizi", "blocked"}
 THEME_STYLES = {
     "imperial": {
         "bg": "#efe4d6",
@@ -469,6 +469,23 @@ def build_dashboard_data(openclaw_dir):
     }
 
 
+def dashboard_signature(data):
+    def normalize(value):
+        if isinstance(value, dict):
+            cleaned = {}
+            for key, item in value.items():
+                if key in {"signature", "generatedAt", "generatedAgo"} or key.endswith("Ago"):
+                    continue
+                cleaned[key] = normalize(item)
+            return cleaned
+        if isinstance(value, list):
+            return [normalize(item) for item in value]
+        return value
+
+    raw = json.dumps(normalize(data), ensure_ascii=False, sort_keys=True).encode("utf-8")
+    return hashlib.sha1(raw).hexdigest()
+
+
 def render_html(data):
     styles = data["theme"]["styles"]
     json_blob = json.dumps(data, ensure_ascii=False)
@@ -666,7 +683,6 @@ def render_html(data):
       padding: 16px;
       display: grid;
       gap: 12px;
-      container-type: inline-size;
     }}
     .agent-head {{
       display: flex;
@@ -807,6 +823,7 @@ def render_html(data):
       height: 100%;
       border-radius: inherit;
       background: linear-gradient(90deg, var(--accent), var(--accent-soft));
+      transition: width 220ms ease-out;
     }}
     .task-copy {{
       line-height: 1.6;
@@ -925,9 +942,31 @@ def render_html(data):
       border: 1px solid var(--line);
       text-decoration: none;
     }}
-    .countdown {{
+    .live-indicator {{
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
       color: var(--muted);
       font-size: 0.94rem;
+      transition: color 180ms ease-out;
+    }}
+    .live-indicator::before {{
+      content: "";
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: currentColor;
+      box-shadow: 0 0 0 0 currentColor;
+      animation: pulse 2.2s infinite;
+    }}
+    .live-indicator[data-tone="live"] {{ color: var(--ok); }}
+    .live-indicator[data-tone="warn"] {{ color: var(--warn); }}
+    .live-indicator[data-tone="idle"] {{ color: var(--muted); }}
+    .live-indicator[data-tone="paused"] {{ color: var(--accent-strong); }}
+    @keyframes pulse {{
+      0% {{ box-shadow: 0 0 0 0 color-mix(in srgb, currentColor 28%, transparent); }}
+      70% {{ box-shadow: 0 0 0 12px color-mix(in srgb, currentColor 0%, transparent); }}
+      100% {{ box-shadow: 0 0 0 0 color-mix(in srgb, currentColor 0%, transparent); }}
     }}
     @media (max-width: 1220px) {{
       .metric-grid {{ grid-template-columns: repeat(3, minmax(0, 1fr)); }}
@@ -947,7 +986,7 @@ def render_html(data):
       .event::before {{ left: -15px; }}
     }}
     @media (prefers-reduced-motion: reduce) {{
-      * {{ scroll-behavior: auto !important; }}
+      * {{ scroll-behavior: auto !important; animation: none !important; transition: none !important; }}
     }}
   </style>
 </head>
@@ -958,16 +997,16 @@ def render_html(data):
       <h1>用户终于能看到协同正在发生。</h1>
       <p class="lede">这不是任务清单，而是运行中的协作现场。你能看到每个 Agent 当前的焦点、接力路径、最近信号和阻塞点，判断系统是真的在并行推进，还是只是在串行等待。</p>
       <div class="hero-meta">
-        <span>主题：<strong>{data['theme']['displayName']}</strong></span>
-        <span>主理人：<strong>{data['ownerTitle']}</strong></span>
+        <span>主题：<strong id="theme-name"></strong></span>
+        <span>主理人：<strong id="owner-title"></strong></span>
         <span>生成时间：<strong id="generated-at"></strong></span>
-        <span>安装目录：<strong>{data['openclawDir']}</strong></span>
+        <span>安装目录：<strong id="install-dir"></strong></span>
       </div>
       <div class="hero-tools">
         <button class="button" id="refresh-now">立即刷新</button>
-        <button class="button ghost" id="toggle-refresh">暂停自动刷新</button>
+        <button class="button ghost" id="toggle-refresh">暂停实时刷新</button>
         <a class="button ghost" href="./collaboration-dashboard.json">查看 JSON 快照</a>
-        <span class="countdown" id="countdown"></span>
+        <span class="live-indicator" data-tone="idle" id="live-indicator"></span>
       </div>
       <div class="metric-grid" id="metric-grid"></div>
     </section>
@@ -1017,18 +1056,27 @@ def render_html(data):
 
   <script id="dashboard-data" type="application/json">{json_blob}</script>
   <script>
-    const data = JSON.parse(document.getElementById("dashboard-data").textContent);
-    const generatedAt = document.getElementById("generated-at");
+    let state = JSON.parse(document.getElementById("dashboard-data").textContent);
     const metricGrid = document.getElementById("metric-grid");
     const relayGrid = document.getElementById("relay-grid");
     const agentGrid = document.getElementById("agent-grid");
     const taskList = document.getElementById("task-list");
     const eventFeed = document.getElementById("event-feed");
+    const generatedAt = document.getElementById("generated-at");
+    const themeName = document.getElementById("theme-name");
+    const ownerTitle = document.getElementById("owner-title");
+    const installDir = document.getElementById("install-dir");
     const refreshNow = document.getElementById("refresh-now");
     const toggleRefresh = document.getElementById("toggle-refresh");
-    const countdown = document.getElementById("countdown");
+    const liveIndicator = document.getElementById("live-indicator");
+
+    const supportsHttp = location.protocol.startsWith("http");
     let paused = false;
-    let seconds = 15;
+    let eventSource = null;
+    let reconnectTimer = null;
+    let lastSyncAt = Date.now();
+    let connectionMode = supportsHttp ? "connecting" : "snapshot";
+    let fetchInFlight = false;
 
     function el(tag, className, text) {{
       const node = document.createElement(tag);
@@ -1037,14 +1085,24 @@ def render_html(data):
       return node;
     }}
 
+    function clearNode(node) {{
+      node.textContent = "";
+    }}
+
+    function setLiveStatus(text, tone) {{
+      liveIndicator.dataset.tone = tone;
+      liveIndicator.textContent = text;
+    }}
+
     function renderMetrics() {{
+      clearNode(metricGrid);
       const metrics = [
-        ["活跃任务", data.metrics.activeTasks, "还在推进中的任务数量"],
-        ["活跃 Agent", data.metrics.activeAgents, "当前正在处理或等待结果的 Agent"],
-        ["阻塞任务", data.metrics.blockedTasks, "需要用户介入或额外资源的任务"],
-        ["今日完成", data.metrics.completedToday, "过去 24 小时完成的任务"],
-        ["24h 接力", data.metrics.handoffs24h, "最近 24 小时 handoff 总次数"],
-        ["1h 信号", data.metrics.signals1h, "最近一小时 progress 与 handoff 信号"],
+        ["活跃任务", state.metrics.activeTasks, "还在推进中的任务数量"],
+        ["活跃 Agent", state.metrics.activeAgents, "当前正在处理或等待结果的 Agent"],
+        ["阻塞任务", state.metrics.blockedTasks, "需要用户介入或额外资源的任务"],
+        ["今日完成", state.metrics.completedToday, "过去 24 小时完成的任务"],
+        ["24h 接力", state.metrics.handoffs24h, "最近 24 小时 handoff 总次数"],
+        ["1h 信号", state.metrics.signals1h, "最近一小时 progress 与 handoff 信号"],
       ];
       metrics.forEach(([label, value, note]) => {{
         const card = el("div", "metric");
@@ -1056,11 +1114,12 @@ def render_html(data):
     }}
 
     function renderRelays() {{
-      if (!data.relays.length) {{
+      clearNode(relayGrid);
+      if (!state.relays.length) {{
         relayGrid.append(el("div", "empty", "最近 24 小时还没有足够的接力记录。先运行几轮任务，协同图就会出现。"));
         return;
       }}
-      data.relays.forEach((relay) => {{
+      state.relays.forEach((relay) => {{
         const card = el("div", "relay");
         card.append(el("div", "relay-path", `${{relay.from}} → ${{relay.to}}`));
         card.append(el("div", "relay-count", `${{relay.count}} 次`));
@@ -1070,14 +1129,14 @@ def render_html(data):
     }}
 
     function renderAgents() {{
-      data.agents.forEach((agent) => {{
+      clearNode(agentGrid);
+      state.agents.forEach((agent) => {{
         const card = el("article", "agent-card");
         const head = el("div", "agent-head");
         const identity = el("div");
         identity.append(el("div", "agent-title", agent.title));
         identity.append(el("div", "agent-meta", `${{agent.name}} · ${{agent.id}} · ${{agent.model}}`));
-        const status = el("div", `status status-${{agent.status}}`, agent.status);
-        head.append(identity, status);
+        head.append(identity, el("div", `status status-${{agent.status}}`, agent.status));
         card.append(head);
 
         const facts = el("div", "agent-facts");
@@ -1105,11 +1164,12 @@ def render_html(data):
     }}
 
     function renderTasks() {{
-      if (!data.tasks.length) {{
+      clearNode(taskList);
+      if (!state.tasks.length) {{
         taskList.append(el("div", "empty", "当前没有活跃任务。可以先发起一个明确任务，系统会在这里展示协同过程。"));
         return;
       }}
-      data.tasks.forEach((task) => {{
+      state.tasks.forEach((task) => {{
         const card = el("article", `task-card${{task.blocked ? ' blocked' : ''}}`);
         const head = el("div", "task-head");
         const titleWrap = el("div");
@@ -1148,11 +1208,12 @@ def render_html(data):
     }}
 
     function renderEvents() {{
-      if (!data.events.length) {{
+      clearNode(eventFeed);
+      if (!state.events.length) {{
         eventFeed.append(el("div", "empty", "还没有 progress 或 handoff 事件。"));
         return;
       }}
-      data.events.forEach((event) => {{
+      state.events.forEach((event) => {{
         const item = el("article", `event event-${{event.type}}`);
         const head = el("div", "event-head");
         const title = el("div");
@@ -1168,37 +1229,141 @@ def render_html(data):
       }});
     }}
 
-    function updateCountdown() {{
-      countdown.textContent = paused ? "自动刷新已暂停" : `${{seconds}} 秒后自动刷新`;
+    function renderMeta() {{
+      generatedAt.textContent = new Date(state.generatedAt).toLocaleString();
+      themeName.textContent = state.theme.displayName;
+      ownerTitle.textContent = state.ownerTitle;
+      installDir.textContent = state.openclawDir;
     }}
 
-    refreshNow.addEventListener("click", () => location.reload());
-    toggleRefresh.addEventListener("click", () => {{
+    function renderAll() {{
+      renderMeta();
+      renderMetrics();
+      renderRelays();
+      renderAgents();
+      renderTasks();
+      renderEvents();
+    }}
+
+    async function fetchLatestDashboard(reason = "manual") {{
+      if (!supportsHttp || paused || fetchInFlight) {{
+        return;
+      }}
+      fetchInFlight = true;
+      try {{
+        const response = await fetch(`./api/dashboard?_=${{Date.now()}}`, {{ cache: "no-store" }});
+        if (!response.ok) {{
+          throw new Error(`HTTP ${{response.status}}`);
+        }}
+        state = await response.json();
+        lastSyncAt = Date.now();
+        renderAll();
+        connectionMode = reason === "stream" ? "live" : connectionMode;
+      }} catch (_error) {{
+        connectionMode = "degraded";
+      }} finally {{
+        fetchInFlight = false;
+      }}
+    }}
+
+    function disconnectLive() {{
+      if (eventSource) {{
+        eventSource.close();
+        eventSource = null;
+      }}
+      if (reconnectTimer) {{
+        clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+      }}
+    }}
+
+    function connectLive() {{
+      if (!supportsHttp || paused) {{
+        return;
+      }}
+      if (!window.EventSource) {{
+        connectionMode = "snapshot";
+        return;
+      }}
+      disconnectLive();
+      connectionMode = "connecting";
+      setLiveStatus("正在建立实时连接...", "warn");
+      eventSource = new EventSource("./events");
+      eventSource.addEventListener("dashboard", async () => {{
+        await fetchLatestDashboard("stream");
+      }});
+      eventSource.onopen = () => {{
+        connectionMode = "live";
+        lastSyncAt = Date.now();
+      }};
+      eventSource.onerror = () => {{
+        if (paused) {{
+          return;
+        }}
+        connectionMode = "degraded";
+        disconnectLive();
+        reconnectTimer = setTimeout(() => connectLive(), 4000);
+      }};
+    }}
+
+    refreshNow.addEventListener("click", async () => {{
+      if (supportsHttp) {{
+        await fetchLatestDashboard("manual");
+      }} else {{
+        location.reload();
+      }}
+    }});
+
+    toggleRefresh.addEventListener("click", async () => {{
       paused = !paused;
-      toggleRefresh.textContent = paused ? "恢复自动刷新" : "暂停自动刷新";
-      updateCountdown();
+      toggleRefresh.textContent = paused ? "恢复实时刷新" : "暂停实时刷新";
+      if (paused) {{
+        disconnectLive();
+        setLiveStatus("实时刷新已暂停", "paused");
+      }} else {{
+        await fetchLatestDashboard("manual");
+        connectLive();
+      }}
     }});
 
     setInterval(() => {{
-      if (paused) return;
-      seconds -= 1;
-      if (seconds <= 0) {{
-        location.reload();
+      if (paused) {{
+        return;
       }}
-      updateCountdown();
+      if (!supportsHttp) {{
+        setLiveStatus("当前是本地快照模式", "idle");
+        return;
+      }}
+      const ageSeconds = Math.max(0, Math.floor((Date.now() - lastSyncAt) / 1000));
+      if (connectionMode === "live") {{
+        setLiveStatus(`实时连接中 · 最近同步 ${{ageSeconds}} 秒前`, "live");
+      }} else if (connectionMode === "connecting") {{
+        setLiveStatus("正在建立实时连接...", "warn");
+      }} else if (connectionMode === "degraded") {{
+        setLiveStatus(`连接中断，正在重连 · 最近同步 ${{ageSeconds}} 秒前`, "warn");
+      }} else {{
+        setLiveStatus(`快照模式 · 最近同步 ${{ageSeconds}} 秒前`, "idle");
+      }}
     }}, 1000);
 
-    generatedAt.textContent = new Date(data.generatedAt).toLocaleString();
-    updateCountdown();
-    renderMetrics();
-    renderRelays();
-    renderAgents();
-    renderTasks();
-    renderEvents();
+    renderAll();
+    if (supportsHttp) {{
+      connectLive();
+      fetchLatestDashboard("manual");
+    }} else {{
+      setLiveStatus("当前是本地快照模式", "idle");
+    }}
   </script>
 </body>
 </html>
 """
+
+
+def build_dashboard_bundle(openclaw_dir, output_dir=None):
+    data = build_dashboard_data(openclaw_dir)
+    data["signature"] = dashboard_signature(data)
+    paths = write_dashboard_files(openclaw_dir, data, output_dir=output_dir)
+    return data, paths
 
 
 def write_dashboard_files(openclaw_dir, data, output_dir=None):
@@ -1213,9 +1378,80 @@ def write_dashboard_files(openclaw_dir, data, output_dir=None):
     return {"json": json_path, "html": html_path}
 
 
-def serve_directory(directory, port):
-    handler = partial(SimpleHTTPRequestHandler, directory=str(directory))
-    server = ThreadingHTTPServer(("127.0.0.1", port), handler)
+class CollaborationDashboardHandler(BaseHTTPRequestHandler):
+    server_version = "SanshengDashboard/1.4"
+
+    def log_message(self, format, *args):
+        return
+
+    def _send_bytes(self, body, content_type, status=200):
+        self.send_response(status)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store, no-cache, must-revalidate")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _bundle(self):
+        return build_dashboard_bundle(self.server.openclaw_dir, self.server.output_dir)
+
+    def do_GET(self):
+        path = self.path.split("?", 1)[0]
+        if path in ("/", "/collaboration-dashboard.html"):
+            data, _paths = self._bundle()
+            body = render_html(data).encode("utf-8")
+            self._send_bytes(body, "text/html; charset=utf-8")
+            return
+        if path in ("/api/dashboard", "/collaboration-dashboard.json"):
+            data, _paths = self._bundle()
+            body = (json.dumps(data, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+            self._send_bytes(body, "application/json; charset=utf-8")
+            return
+        if path == "/events":
+            self._serve_events()
+            return
+
+        body = b"Not found"
+        self._send_bytes(body, "text/plain; charset=utf-8", status=404)
+
+    def _serve_events(self):
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        self.send_header("Cache-Control", "no-store, no-cache, must-revalidate")
+        self.send_header("Connection", "keep-alive")
+        self.end_headers()
+
+        last_signature = None
+        try:
+            self.wfile.write(b"retry: 3000\n\n")
+            self.wfile.flush()
+            while True:
+                data, _paths = self._bundle()
+                if data["signature"] != last_signature:
+                    payload = json.dumps(
+                        {
+                            "signature": data["signature"],
+                            "generatedAt": data["generatedAt"],
+                        },
+                        ensure_ascii=False,
+                    )
+                    self.wfile.write(f"event: dashboard\ndata: {payload}\n\n".encode("utf-8"))
+                    self.wfile.flush()
+                    last_signature = data["signature"]
+                else:
+                    self.wfile.write(b": ping\n\n")
+                    self.wfile.flush()
+                time.sleep(self.server.live_interval)
+        except (BrokenPipeError, ConnectionResetError, TimeoutError):
+            return
+
+
+def serve_dashboard(openclaw_dir, output_dir, port, live_interval):
+    server = ThreadingHTTPServer(("127.0.0.1", port), CollaborationDashboardHandler)
+    server.openclaw_dir = Path(openclaw_dir)
+    server.output_dir = Path(output_dir) if output_dir else Path(openclaw_dir) / "dashboard"
+    server.live_interval = live_interval
+    build_dashboard_bundle(server.openclaw_dir, server.output_dir)
     print(f"Serving collaboration dashboard at http://127.0.0.1:{port}/collaboration-dashboard.html")
     try:
         server.serve_forever()
@@ -1231,17 +1467,17 @@ def main():
     parser.add_argument("--output-dir", default="")
     parser.add_argument("--serve", action="store_true")
     parser.add_argument("--port", type=int, default=18890)
+    parser.add_argument("--live-interval", type=float, default=2.0)
     parser.add_argument("--quiet", action="store_true")
     args = parser.parse_args()
 
     openclaw_dir = infer_openclaw_dir(args.dir)
-    data = build_dashboard_data(openclaw_dir)
-    paths = write_dashboard_files(openclaw_dir, data, args.output_dir or None)
+    data, paths = build_dashboard_bundle(openclaw_dir, args.output_dir or None)
     if not args.quiet:
         print(f"Generated dashboard HTML: {paths['html']}")
         print(f"Generated dashboard JSON: {paths['json']}")
     if args.serve:
-        serve_directory(paths["html"].parent, args.port)
+        serve_dashboard(openclaw_dir, args.output_dir or None, args.port, args.live_interval)
 
 
 if __name__ == "__main__":

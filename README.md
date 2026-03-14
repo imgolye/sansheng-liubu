@@ -4,7 +4,7 @@
 
 一键部署 11 个协作 AI Agent，模拟组织架构处理复杂任务。
 
-## 1.3.0 亮点
+## 1.4.0 亮点
 
 现在不只是能跑多 Agent，还能让用户看到协同正在发生：
 
@@ -15,6 +15,7 @@ python3 ~/.openclaw/workspace-your-router-id/scripts/collaboration_dashboard.py 
 这一版新增：
 - 协同态势看板：看到谁在执行、谁在等待、任务如何接力
 - HTML + JSON 双输出：适合浏览器查看，也适合后续接系统面板
+- 本地实时 Web 面板：`--serve` 会启动带 SSE 推送的常驻监控页
 - 运行中切换主题：`bash bin/switch_theme.sh --theme startup`
 - 自动迁移：保留现有频道、模型、网关 token、任务板和 workspace 产物
 
@@ -137,6 +138,14 @@ python3 ~/.openclaw/workspace-${ROUTER_ID}/scripts/health_dashboard.py
 python3 ~/.openclaw/workspace-${ROUTER_ID}/scripts/collaboration_dashboard.py
 python3 ~/.openclaw/workspace-${ROUTER_ID}/scripts/collaboration_dashboard.py --serve
 ```
+
+`--serve` 会启动本地实时面板，默认地址：
+
+```text
+http://127.0.0.1:18890/collaboration-dashboard.html
+```
+
+它会通过 Server-Sent Events 实时接收任务与协同变化，不再整页重载。
 
 生成结果默认在：
 

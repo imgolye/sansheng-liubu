@@ -123,7 +123,7 @@ for row in "${AGENT_ROWS[@]}"; do
     fail "缺少 kanban_config.json: $agent"
   fi
 
-  if [[ -f "$workspace/scripts/kanban_update.py" ]] && [[ -f "$workspace/scripts/file_lock.py" ]] && [[ -f "$workspace/scripts/refresh_live_data.py" ]] && [[ -f "$workspace/scripts/health_dashboard.py" ]] && [[ -f "$workspace/scripts/collaboration_dashboard.py" ]]; then
+  if [[ -f "$workspace/scripts/kanban_update.py" ]] && [[ -f "$workspace/scripts/file_lock.py" ]] && [[ -f "$workspace/scripts/dashboard_store.py" ]] && [[ -f "$workspace/scripts/refresh_live_data.py" ]] && [[ -f "$workspace/scripts/health_dashboard.py" ]] && [[ -f "$workspace/scripts/collaboration_dashboard.py" ]]; then
     SCRIPT_OK=$((SCRIPT_OK + 1))
   else
     fail "缺少看板脚本: $agent"

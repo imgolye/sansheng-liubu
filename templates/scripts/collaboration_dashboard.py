@@ -20,9 +20,17 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, quote, urlsplit
 
+from dashboard_store import (
+    append_audit_event as store_append_audit_event,
+    load_audit_events as store_load_audit_events,
+    load_product_users as store_load_product_users,
+    save_product_users as store_save_product_users,
+    store_path as dashboard_store_path,
+)
+
 
 TERMINAL_STATES = {"done", "cancelled", "canceled"}
-PRODUCT_VERSION = "1.13.0"
+PRODUCT_VERSION = "1.14.0"
 OPENCLAW_BASELINE_RELEASE = "2026.3.12"
 PASSWORD_HASH_ITERATIONS = 260000
 USER_ROLES = {
@@ -3289,6 +3297,11 @@ __STYLE_VARS__
           body: (admin.workspace || {}).projectDir || "当前安装未记录仓库目录。",
           meta: "主题切换和运行时脚本会使用这个源目录。",
         },
+        {
+          title: "产品数据内核",
+          body: (admin.workspace || {}).storagePath || "当前还没有记录产品数据库路径。",
+          meta: "1.14.0 起账号与审计优先走 SQLite 存储层，而不是分散的 JSON 文件。",
+        },
       ];
       summaries.forEach((item) => {
         const card = el("div", "deliverable-card");
@@ -6063,38 +6076,11 @@ def verify_password(password, encoded):
 
 
 def load_product_users(openclaw_dir):
-    path = users_store_path(openclaw_dir)
-    data = load_json(path, {"users": []})
-    users = data.get("users", []) if isinstance(data, dict) else []
-    normalized = []
-    for user in users:
-        if not isinstance(user, dict):
-            continue
-        username = normalize_username(user.get("username"))
-        if not username:
-            continue
-        normalized.append(
-            {
-                "id": user.get("id") or secrets.token_hex(8),
-                "username": username,
-                "displayName": user.get("displayName") or username,
-                "role": user.get("role") if user.get("role") in USER_ROLES else "viewer",
-                "passwordHash": user.get("passwordHash", ""),
-                "status": user.get("status") if user.get("status") in {"active", "suspended"} else "active",
-                "createdAt": user.get("createdAt", ""),
-                "lastLoginAt": user.get("lastLoginAt", ""),
-            }
-        )
-    return normalized
+    return store_load_product_users(openclaw_dir)
 
 
 def save_product_users(openclaw_dir, users):
-    path = users_store_path(openclaw_dir)
-    payload = {
-        "updatedAt": now_iso(),
-        "users": users,
-    }
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return store_save_product_users(openclaw_dir, users)
 
 
 def safe_user_record(user):
@@ -6213,38 +6199,11 @@ def update_product_user_login(openclaw_dir, username):
 
 
 def append_audit_event(openclaw_dir, action, actor, outcome="success", detail="", meta=None):
-    path = audit_log_path(openclaw_dir)
-    entry = {
-        "id": secrets.token_hex(8),
-        "at": now_iso(),
-        "action": action,
-        "outcome": outcome,
-        "detail": detail,
-        "actor": actor or {"displayName": "system", "role": "owner", "kind": "system"},
-        "meta": meta or {},
-    }
-    with open(path, "a", encoding="utf-8") as f:
-        f.write(json.dumps(entry, ensure_ascii=False) + "\n")
-    return entry
+    return store_append_audit_event(openclaw_dir, action, actor, outcome=outcome, detail=detail, meta=meta)
 
 
 def load_audit_events(openclaw_dir, limit=80):
-    path = audit_log_path(openclaw_dir)
-    if not path.exists():
-        return []
-    events = []
-    for line in path.read_text(encoding="utf-8").splitlines():
-        if not line.strip():
-            continue
-        try:
-            events.append(json.loads(line))
-        except json.JSONDecodeError:
-            continue
-    events.sort(
-        key=lambda item: parse_iso(item.get("at")) or datetime.fromtimestamp(0, tz=timezone.utc),
-        reverse=True,
-    )
-    return events[:limit]
+    return store_load_audit_events(openclaw_dir, limit=limit)
 
 
 def build_admin_data(openclaw_dir, config, now, include_sensitive=True):
@@ -6290,6 +6249,7 @@ def build_admin_data(openclaw_dir, config, now, include_sensitive=True):
             "displayName": metadata.get("displayName") or metadata.get("theme", "Mission Control"),
             "projectDir": metadata.get("projectDir", ""),
             "openclawDir": str(openclaw_dir),
+            "storagePath": str(dashboard_store_path(openclaw_dir)),
         },
         "seatSummary": {
             "total": len(users),

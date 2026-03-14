@@ -4,7 +4,7 @@
 
 一键部署 11 个协作 AI Agent，模拟组织架构处理复杂任务。
 
-## 1.13.0 亮点
+## 1.14.0 亮点
 
 现在不只是一个“本地操作台”，而是已经具备商业后台、Skills Center、OpenClaw 原生控制中心，以及真实会话中心能力的多 Agent 产品：
 
@@ -13,6 +13,8 @@ python3 ~/.openclaw/workspace-your-router-id/scripts/collaboration_dashboard.py 
 ```
 
 这一版新增：
+- 产品数据内核：新增 `dashboard_store.py`，账号和审计优先走 SQLite 存储层，并兼容旧版 JSON / JSONL 自动迁移
+- 工程基线：新增 `tests/test_dashboard_store.py` 和 GitHub Actions CI，开始给 Mission Control 建最小自动化回归
 - 每 Agent 直达对话：Agent 运营台卡片、Agent 抽屉和会话中心都能一键进入对应 Agent 的主会话
 - 会话中心：新增 `/conversations`，直接浏览 OpenClaw 真实 sessions、查看 jsonl transcript，并继续与 Agent 对话
 - 产品内对话：Owner / Operator 可以直接在产品里向选中 Agent 或当前 session 发消息，不再必须回终端

@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.14.0 - 2026-03-14
+
+### Added
+- Added `templates/scripts/dashboard_store.py` as the first Mission Control product-kernel module, backed by SQLite and responsible for product-user plus audit-event storage.
+- Added automatic migration from legacy `product_users.json` and `audit-log.jsonl` into `dashboard/dashboard.db` so existing installs can move forward without losing local product state.
+- Added `tests/test_dashboard_store.py` and a GitHub Actions CI workflow to establish the first automated regression baseline for the product kernel.
+
+### Changed
+- Switched Mission Control account and audit persistence from ad-hoc JSON / JSONL writes to the new SQLite-backed storage layer while keeping the public product behavior unchanged.
+- Extended install, validation, and theme-switch runtime script deployment so `dashboard_store.py` is present everywhere the Mission Control app runs.
+
 ## 1.13.0 - 2026-03-14
 
 ### Added

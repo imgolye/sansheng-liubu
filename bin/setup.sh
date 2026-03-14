@@ -6,7 +6,7 @@ set -euo pipefail
 #  用法: bash setup.sh [--theme imperial|corporate|startup]
 # ============================================================
 
-VERSION="1.13.0"
+VERSION="1.14.0"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 TEMPLATES_DIR="$PROJECT_DIR/templates"
@@ -173,6 +173,7 @@ info "目录结构已创建 (${#ALL_AGENTS[@]} 个 agent)"
 for agent in "${ALL_AGENTS[@]}"; do
   cp "$TEMPLATES_DIR/scripts/kanban_update.py" "$OPENCLAW_DIR/workspace-$agent/scripts/"
   cp "$TEMPLATES_DIR/scripts/file_lock.py" "$OPENCLAW_DIR/workspace-$agent/scripts/"
+  cp "$TEMPLATES_DIR/scripts/dashboard_store.py" "$OPENCLAW_DIR/workspace-$agent/scripts/"
   cp "$TEMPLATES_DIR/scripts/refresh_live_data.py" "$OPENCLAW_DIR/workspace-$agent/scripts/"
   cp "$TEMPLATES_DIR/scripts/health_dashboard.py" "$OPENCLAW_DIR/workspace-$agent/scripts/"
   cp "$TEMPLATES_DIR/scripts/collaboration_dashboard.py" "$OPENCLAW_DIR/workspace-$agent/scripts/"

@@ -32,6 +32,7 @@ TEMPLATES_DIR = PROJECT_DIR / "templates"
 RUNTIME_SCRIPTS = (
     "kanban_update.py",
     "file_lock.py",
+    "dashboard_store.py",
     "refresh_live_data.py",
     "health_dashboard.py",
     "collaboration_dashboard.py",

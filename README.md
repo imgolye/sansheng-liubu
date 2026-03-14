@@ -4,15 +4,23 @@
 
 一键部署 11 个协作 AI Agent，模拟组织架构处理复杂任务。
 
-## 1.15.0 亮点
+## 1.16.0 亮点
 
-现在不只是一个“本地操作台”，而是已经具备商业后台、Skills Center、OpenClaw 原生控制中心，以及真实会话中心能力的多 Agent 产品：
+现在不只是一个“本地操作台”，而是已经拆成真正的前后端分离产品：
 
 ```bash
 python3 ~/.openclaw/workspace-your-router-id/scripts/collaboration_dashboard.py --serve
 ```
 
 这一版新增：
+- 前后端分离：Mission Control 现在由 API-first Python 后端 + `frontend/` React + Ant Design 前端组成
+- SPA 路由：`/login`、`/overview`、`/agents`、`/tasks`、`/conversations`、`/activity`、`/themes`、`/skills`、`/openclaw`、`/admin`
+- JSON 登录：新增 `/api/auth/session`、`/api/auth/login`、`/api/auth/logout`
+- 前端构建托管：`frontend/dist` 构建完成后，后端会自动直接托管新前端；旧版单文件控制台保留在 `/legacy`
+- 路由懒加载：总览、Agent、任务、会话、后台等工作区已经按路由拆包，抽屉和任务创建弹层也做了二级懒加载，减少首屏后台壳层负担
+- 全局搜索更顺滑：Agent、任务、会话统一搜索改成延迟过滤，数据量变大时输入不会明显拖住页面
+- Ant Design 产品壳：左侧菜单导航、顶部控制条、表格工作台、抽屉详情和后台操作面统一改成企业后台语义
+- 商业化首屏：登录页、产品壳和总览页已经重做成更偏控制平面产品的布局，不再像开发后台默认界面
 - 安装舰队：商业后台新增多实例注册与可视化视图，开始把多套本地 OpenClaw 安装收进同一个控制平面
 - 实例登记：Owner 可以登记其他本机 OpenClaw 目录，系统会自动读取其主题、路由 Agent、任务量和实例健康状态
 - 产品数据内核：新增 `dashboard_store.py`，账号和审计优先走 SQLite 存储层，并兼容旧版 JSON / JSONL 自动迁移
@@ -193,6 +201,52 @@ http://127.0.0.1:18890/activity
 http://127.0.0.1:18890/themes
 http://127.0.0.1:18890/skills
 http://127.0.0.1:18890/admin
+```
+
+如果你要使用新的前后端分离版本，可以这样启动：
+
+```bash
+# 先构建前端
+bash bin/build_frontend.sh --project-dir "$(pwd)"
+
+# 再启动后端
+python3 ~/.openclaw/workspace-${ROUTER_ID}/scripts/collaboration_dashboard.py --serve
+```
+
+这时默认产品入口就是：
+
+```text
+http://127.0.0.1:18890/
+```
+
+旧版单文件控制台仍保留在：
+
+```text
+http://127.0.0.1:18890/legacy
+```
+
+如果你在做前端开发，可以把前端和后端分开跑：
+
+```bash
+# 终端 1：backend / API
+python3 ~/.openclaw/workspace-${ROUTER_ID}/scripts/collaboration_dashboard.py --serve
+
+# 终端 2：frontend dev server
+cd frontend
+npm install
+npm run dev
+```
+
+如果你已经有一套旧安装，想把当前仓库的前后端分离运行时同步进去，而不重跑交互式安装，可以直接执行：
+
+```bash
+bash bin/sync_runtime_assets.sh --dir ~/.openclaw --project-dir "$(pwd)" --build-frontend
+```
+
+开发时前端默认地址：
+
+```text
+http://127.0.0.1:5173/
 ```
 
 现在还能直接点开：

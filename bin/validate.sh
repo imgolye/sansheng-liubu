@@ -30,9 +30,16 @@ ok()   { echo -e "${GREEN}[✓]${NC} $*"; }
 warn() { echo -e "${YELLOW}[!]${NC} $*"; }
 fail() { echo -e "${RED}[✗]${NC} $*"; ERRORS=$((ERRORS + 1)); }
 summary_fail() { echo -e "${RED}[✗]${NC} $*"; }
+expand_path() {
+  python3 - "$1" <<'PY'
+import os, sys
+print(os.path.abspath(os.path.expanduser(sys.argv[1])))
+PY
+}
 
 ERRORS=0
 WARNINGS=0
+FRONTEND_WARN=0
 
 echo ""
 echo "=== 三省六部 · 安装验证 ==="
@@ -96,6 +103,8 @@ TASKS_COUNT=0
 
 for row in "${AGENT_ROWS[@]}"; do
   IFS=$'\t' read -r agent workspace agentdir <<< "$row"
+  workspace="$(expand_path "$workspace")"
+  agentdir="$(expand_path "$agentdir")"
 
   if [[ -z "$workspace" || ! -d "$workspace" ]]; then
     fail "缺少 workspace 目录: $agent (${workspace:-未配置})"
@@ -142,11 +151,40 @@ ok "kanban_config.json: $KANBAN_CFG_COUNT 个"
 ok "看板脚本: $SCRIPT_OK 个 workspace 已部署"
 ok "tasks_source.json: $TASKS_COUNT 个"
 
+# 8. 前端分离构建状态
+echo ""
+echo "--- Product Frontend ---"
+PROJECT_DIR=$(python3 - <<'PY' "$OPENCLAW_DIR/openclaw.json" 2>/dev/null || true
+import json, sys
+from pathlib import Path
+
+config_path = Path(sys.argv[1])
+if config_path.exists():
+    config = json.loads(config_path.read_text())
+    print(config.get("sanshengLiubu", {}).get("projectDir", ""))
+PY
+)
+PROJECT_DIR="${PROJECT_DIR:+$(expand_path "$PROJECT_DIR")}"
+
+if [[ -n "$PROJECT_DIR" && -d "$PROJECT_DIR/frontend" ]]; then
+  if [[ -f "$PROJECT_DIR/frontend/dist/index.html" ]]; then
+    ok "前后端分离前端已构建: $PROJECT_DIR/frontend/dist"
+  else
+    warn "检测到 frontend/ 但尚未构建 dist，当前运行时会回落到 /legacy"; WARNINGS=$((WARNINGS + 1)); FRONTEND_WARN=1
+  fi
+else
+  warn "未检测到关联 frontend/ 目录，当前安装只保证旧版控制台可用"; WARNINGS=$((WARNINGS + 1)); FRONTEND_WARN=1
+fi
+
 # Summary
 echo ""
 echo "=== 验证结果 ==="
 if [[ $ERRORS -eq 0 ]]; then
   ok "全部通过 (${WARNINGS} 个警告)"
+  if [[ $FRONTEND_WARN -eq 1 ]]; then
+    echo "提示: 如需启用新的前后端分离界面，请运行:"
+    echo "  bash $PROJECT_DIR/bin/build_frontend.sh --project-dir $PROJECT_DIR"
+  fi
 else
   summary_fail "${ERRORS} 个错误, ${WARNINGS} 个警告"
 fi

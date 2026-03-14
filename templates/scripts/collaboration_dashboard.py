@@ -8,6 +8,7 @@ import base64
 import hashlib
 import hmac
 import json
+import mimetypes
 import os
 import secrets
 import subprocess
@@ -33,7 +34,7 @@ from dashboard_store import (
 
 
 TERMINAL_STATES = {"done", "cancelled", "canceled"}
-PRODUCT_VERSION = "1.15.0"
+PRODUCT_VERSION = "1.16.0"
 OPENCLAW_BASELINE_RELEASE = "2026.3.12"
 PASSWORD_HASH_ITERATIONS = 260000
 USER_ROLES = {
@@ -121,6 +122,12 @@ THEME_CATALOG = {
 
 SESSION_COOKIE_NAME = "sansheng_dashboard_session"
 SESSION_COOKIE_MAX_AGE = 60 * 60 * 12
+DEFAULT_FRONTEND_ORIGINS = {
+    "http://127.0.0.1:5173",
+    "http://localhost:5173",
+    "http://127.0.0.1:4173",
+    "http://localhost:4173",
+}
 
 LOGIN_TEMPLATE = """<!doctype html>
 <html lang="zh-CN">
@@ -208,10 +215,11 @@ LOGIN_TEMPLATE = """<!doctype html>
     }}
     h1 {{
       margin: 18px 0 14px;
-      font-family: "Fraunces", "Times New Roman", serif;
-      font-size: clamp(2.8rem, 5vw, 5rem);
-      line-height: 0.92;
-      max-width: 10ch;
+      font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+      font-size: clamp(2.1rem, 4vw, 3.2rem);
+      line-height: 1.12;
+      letter-spacing: -0.02em;
+      max-width: none;
     }}
     .lede {{
       max-width: 56ch;
@@ -227,9 +235,9 @@ LOGIN_TEMPLATE = """<!doctype html>
       gap: 14px;
     }}
     .story-card {{
-      border-radius: 20px;
+      border-radius: 14px;
       border: 1px solid var(--line);
-      background: rgba(255,255,255,0.64);
+      background: rgba(255,255,255,0.96);
       padding: 16px;
     }}
     .story-card span {{
@@ -264,9 +272,10 @@ LOGIN_TEMPLATE = """<!doctype html>
     }}
     .auth-top h2 {{
       margin: 0;
-      font-family: "Fraunces", "Times New Roman", serif;
-      font-size: 2.3rem;
-      line-height: 0.96;
+      font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+      font-size: 1.9rem;
+      font-weight: 700;
+      line-height: 1.2;
     }}
     .auth-top p,
     .auth-help,
@@ -284,9 +293,9 @@ LOGIN_TEMPLATE = """<!doctype html>
       display: inline-flex;
       align-items: center;
       gap: 8px;
-      border-radius: 999px;
+      border-radius: 10px;
       border: 1px solid var(--line);
-      background: rgba(255,255,255,0.72);
+      background: rgba(255,255,255,0.96);
       padding: 8px 12px;
       font-size: 0.84rem;
       font-weight: 700;
@@ -305,9 +314,9 @@ LOGIN_TEMPLATE = """<!doctype html>
     input[type="password"],
     input[type="text"] {{
       width: 100%;
-      border-radius: 18px;
+      border-radius: 10px;
       border: 1px solid var(--line);
-      background: rgba(255,255,255,0.88);
+      background: rgba(255,255,255,0.98);
       color: var(--ink);
       padding: 14px 16px;
       outline: none;
@@ -321,17 +330,17 @@ LOGIN_TEMPLATE = """<!doctype html>
     .button {{
       appearance: none;
       border: 0;
-      border-radius: 999px;
-      padding: 13px 18px;
+      border-radius: 10px;
+      padding: 11px 16px;
       background: var(--accent);
       color: #fffaf3;
-      font-weight: 700;
+      font-weight: 600;
       cursor: pointer;
       text-decoration: none;
-      box-shadow: 0 14px 30px rgba(130, 73, 24, 0.18);
+      box-shadow: none;
     }}
     .button.secondary {{
-      background: rgba(255,255,255,0.82);
+      background: rgba(255,255,255,0.96);
       color: var(--ink);
       box-shadow: none;
       border: 1px solid var(--line);
@@ -470,8 +479,8 @@ HTML_TEMPLATE = """<!doctype html>
   <style>
     :root {
 __STYLE_VARS__
-      --shadow: 0 26px 80px rgba(46, 31, 21, 0.12);
-      --shadow-soft: 0 12px 28px rgba(46, 31, 21, 0.08);
+      --shadow: 0 14px 32px rgba(15, 23, 42, 0.08);
+      --shadow-soft: 0 6px 18px rgba(15, 23, 42, 0.06);
     }
     * { box-sizing: border-box; }
     html, body { margin: 0; min-height: 100%; }
@@ -479,9 +488,7 @@ __STYLE_VARS__
       font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
       color: var(--ink);
       background:
-        radial-gradient(circle at 0% 0%, rgba(255,255,255,0.7), transparent 32%),
-        radial-gradient(circle at 100% 0%, rgba(255,255,255,0.4), transparent 28%),
-        linear-gradient(155deg, var(--bg), var(--bg2));
+        linear-gradient(180deg, color-mix(in srgb, var(--bg2) 88%, white 12%), color-mix(in srgb, var(--bg) 92%, white 8%));
     }
     button, input, textarea, select { font: inherit; }
     .shell {
@@ -493,24 +500,23 @@ __STYLE_VARS__
     .hero {
       position: relative;
       overflow: hidden;
-      padding: 28px;
-      border-radius: 30px;
+      padding: 24px;
+      border-radius: 20px;
       border: 1px solid var(--line);
       background:
-        linear-gradient(130deg, color-mix(in srgb, var(--panel) 88%, white 12%), rgba(255,255,255,0.55)),
-        radial-gradient(circle at 100% 0%, color-mix(in srgb, var(--accentSoft) 72%, white 28%), transparent 42%);
+        linear-gradient(180deg, color-mix(in srgb, var(--panel) 94%, white 6%), rgba(255,255,255,0.96));
       box-shadow: var(--shadow);
     }
     .hero::after {
       content: "";
       position: absolute;
-      right: -96px;
-      top: -84px;
-      width: 280px;
-      height: 280px;
+      right: -72px;
+      top: -96px;
+      width: 220px;
+      height: 220px;
       border-radius: 50%;
-      background: radial-gradient(circle, color-mix(in srgb, var(--accentSoft) 78%, white 22%), transparent 64%);
-      opacity: 0.78;
+      background: radial-gradient(circle, color-mix(in srgb, var(--accentSoft) 42%, white 58%), transparent 68%);
+      opacity: 0.55;
       pointer-events: none;
     }
     .eyebrow {
@@ -531,11 +537,12 @@ __STYLE_VARS__
       opacity: 0.75;
     }
     h1 {
-      margin: 14px 0 12px;
-      font-family: "Fraunces", "Times New Roman", serif;
-      font-size: clamp(2.5rem, 4vw, 5rem);
-      line-height: 0.94;
-      max-width: 11ch;
+      margin: 10px 0 10px;
+      font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+      font-size: clamp(1.9rem, 3.2vw, 2.8rem);
+      line-height: 1.15;
+      letter-spacing: -0.02em;
+      max-width: none;
     }
     .lede {
       max-width: 76ch;
@@ -561,19 +568,19 @@ __STYLE_VARS__
     .button {
       appearance: none;
       border: 0;
-      border-radius: 999px;
-      padding: 11px 16px;
+      border-radius: 10px;
+      padding: 10px 14px;
       background: var(--accent);
       color: #fffaf3;
-      font-weight: 700;
+      font-weight: 600;
       cursor: pointer;
-      box-shadow: 0 12px 26px rgba(130, 73, 24, 0.18);
-      transition: transform 140ms ease-out, box-shadow 140ms ease-out, background 140ms ease-out;
+      box-shadow: none;
+      transition: transform 140ms ease-out, border-color 140ms ease-out, background 140ms ease-out;
       text-decoration: none;
     }
     .button:hover { transform: translateY(-1px); }
     .button.secondary {
-      background: rgba(255,255,255,0.72);
+      background: rgba(255,255,255,0.94);
       color: var(--ink);
       box-shadow: none;
       border: 1px solid var(--line);
@@ -629,9 +636,9 @@ __STYLE_VARS__
       gap: 14px;
     }
     .studio-card {
-      border-radius: 22px;
+      border-radius: 16px;
       border: 1px solid var(--line);
-      background: rgba(255,255,255,0.64);
+      background: rgba(255,255,255,0.96);
       padding: 16px;
       display: grid;
       gap: 12px;
@@ -672,14 +679,14 @@ __STYLE_VARS__
     .text-input,
     .text-area {
       width: 100%;
-      border-radius: 16px;
+      border-radius: 10px;
       border: 1px solid var(--line);
-      background: rgba(255,255,255,0.84);
+      background: rgba(255,255,255,0.98);
       color: var(--ink);
       padding: 12px 14px;
       outline: none;
-      box-shadow: inset 0 1px 0 rgba(255,255,255,0.58);
-      transition: border-color 140ms ease-out, box-shadow 140ms ease-out;
+      box-shadow: none;
+      transition: border-color 140ms ease-out, box-shadow 140ms ease-out, background 140ms ease-out;
     }
     .text-area {
       resize: vertical;
@@ -713,19 +720,18 @@ __STYLE_VARS__
       font-size: 0.9rem;
     }
     .selection-card {
-      border-radius: 22px;
+      border-radius: 16px;
       border: 1px solid var(--line);
-      background:
-        linear-gradient(150deg, rgba(255,255,255,0.74), rgba(255,255,255,0.52)),
-        radial-gradient(circle at 100% 0%, color-mix(in srgb, var(--accentSoft) 62%, white 38%), transparent 44%);
+      background: rgba(255,255,255,0.98);
       padding: 18px;
       display: grid;
       gap: 12px;
     }
     .selection-title {
-      font-family: "Fraunces", "Times New Roman", serif;
-      font-size: 1.5rem;
-      line-height: 1.02;
+      font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+      font-size: 1.22rem;
+      line-height: 1.3;
+      font-weight: 700;
     }
     .selection-stats {
       display: grid;
@@ -756,6 +762,388 @@ __STYLE_VARS__
       flex-wrap: wrap;
       gap: 8px;
       align-items: center;
+    }
+    .operations-view {
+      display: grid;
+      gap: 18px;
+    }
+    .workspace-hero {
+      position: relative;
+      overflow: hidden;
+      border-radius: 18px;
+      border: 1px solid var(--line);
+      background:
+        linear-gradient(180deg, rgba(255,255,255,0.98), rgba(255,255,255,0.94));
+      box-shadow: var(--shadow-soft);
+      padding: 22px;
+      display: grid;
+      gap: 20px;
+    }
+    .workspace-hero::after {
+      content: "";
+      position: absolute;
+      right: -72px;
+      bottom: -110px;
+      width: 180px;
+      height: 180px;
+      border-radius: 50%;
+      background: radial-gradient(circle, color-mix(in srgb, var(--accentSoft) 28%, white 72%), transparent 68%);
+      opacity: 0.38;
+      pointer-events: none;
+    }
+    .workspace-hero-head {
+      display: grid;
+      grid-template-columns: minmax(0, 1.15fr) minmax(290px, 0.85fr);
+      gap: 18px;
+      align-items: end;
+    }
+    .workspace-hero-title {
+      margin: 8px 0 6px;
+      font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+      font-size: clamp(1.7rem, 2.8vw, 2.3rem);
+      font-weight: 700;
+      line-height: 1.22;
+      letter-spacing: -0.02em;
+      max-width: none;
+    }
+    .workspace-hero-copy {
+      max-width: 60ch;
+      color: var(--muted);
+      line-height: 1.74;
+      font-size: 0.98rem;
+      margin: 0;
+    }
+    .workspace-note-card {
+      border-radius: 16px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,0.98);
+      padding: 18px;
+      display: grid;
+      gap: 8px;
+      box-shadow: none;
+      justify-self: end;
+      width: min(100%, 340px);
+    }
+    .workspace-note-card span,
+    .workspace-kpi-card span {
+      color: var(--muted);
+      font-size: 0.76rem;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      font-weight: 700;
+    }
+    .workspace-note-card strong {
+      font-size: 1.14rem;
+      line-height: 1.42;
+    }
+    .workspace-note-card p,
+    .workspace-kpi-card p {
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.62;
+      font-size: 0.93rem;
+    }
+    .workspace-kpi-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 14px;
+    }
+    .workspace-kpi-card {
+      border-radius: 16px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,0.98);
+      padding: 18px;
+      display: grid;
+      gap: 10px;
+      min-height: 148px;
+    }
+    .workspace-kpi-card strong {
+      font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+      font-size: clamp(1.2rem, 1.8vw, 1.6rem);
+      font-weight: 700;
+      line-height: 1.28;
+    }
+    .workspace-kpi-meta {
+      color: var(--ink);
+      font-size: 0.9rem;
+      line-height: 1.58;
+      padding-top: 3px;
+      border-top: 1px solid rgba(98, 63, 49, 0.08);
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .workspace-split {
+      display: grid;
+      grid-template-columns: minmax(0, 1.16fr) minmax(320px, 0.84fr);
+      gap: 18px;
+      align-items: start;
+    }
+    .workspace-panel .panel-head {
+      padding: 20px 22px 14px;
+    }
+    .workspace-panel .panel-title {
+      font-size: 1.34rem;
+    }
+    .panel-body {
+      padding: 18px 20px 20px;
+    }
+    .admin-view {
+      display: grid;
+      gap: 18px;
+    }
+    .admin-hero {
+      position: relative;
+      overflow: hidden;
+      border-radius: 18px;
+      border: 1px solid var(--line);
+      background:
+        linear-gradient(180deg, rgba(255,255,255,0.98), rgba(255,255,255,0.94));
+      box-shadow: var(--shadow-soft);
+      padding: 22px;
+      display: grid;
+      gap: 22px;
+    }
+    .admin-hero::after {
+      content: "";
+      position: absolute;
+      right: -86px;
+      bottom: -110px;
+      width: 180px;
+      height: 180px;
+      border-radius: 50%;
+      background: radial-gradient(circle, color-mix(in srgb, var(--accentSoft) 26%, white 74%), transparent 68%);
+      opacity: 0.36;
+      pointer-events: none;
+    }
+    .admin-hero-head {
+      display: grid;
+      grid-template-columns: minmax(0, 1.2fr) minmax(300px, 0.8fr);
+      gap: 20px;
+      align-items: end;
+    }
+    .admin-hero-title {
+      margin: 8px 0 6px;
+      font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+      font-size: clamp(1.8rem, 3vw, 2.5rem);
+      font-weight: 700;
+      line-height: 1.2;
+      letter-spacing: -0.02em;
+      max-width: none;
+    }
+    .admin-hero-copy {
+      max-width: 60ch;
+      color: var(--muted);
+      line-height: 1.76;
+      font-size: 1rem;
+    }
+    .admin-hero-side {
+      display: grid;
+      gap: 12px;
+      justify-items: end;
+      align-content: end;
+    }
+    .admin-chip-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      justify-content: flex-end;
+    }
+    .admin-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,0.76);
+      color: var(--accentStrong);
+      font-size: 0.8rem;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      font-weight: 700;
+    }
+    .admin-note-card {
+      width: min(100%, 340px);
+      border-radius: 24px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,0.76);
+      padding: 18px;
+      display: grid;
+      gap: 8px;
+      box-shadow: 0 18px 38px rgba(67, 47, 31, 0.08);
+    }
+    .admin-note-card span,
+    .admin-kpi-card span,
+    .admin-mini-stat span {
+      color: var(--muted);
+      font-size: 0.76rem;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      font-weight: 700;
+    }
+    .admin-note-card strong {
+      font-size: 1.12rem;
+      line-height: 1.42;
+    }
+    .admin-note-card p {
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.65;
+      font-size: 0.92rem;
+    }
+    .admin-kpi-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
+    }
+    .admin-kpi-card {
+      border-radius: 16px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,0.98);
+      padding: 18px;
+      display: grid;
+      gap: 10px;
+      min-height: 154px;
+    }
+    .admin-kpi-card strong {
+      font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+      font-size: 1.4rem;
+      font-weight: 700;
+      line-height: 1.28;
+    }
+    .admin-kpi-card p,
+    .admin-kpi-meta,
+    .admin-role-card p,
+    .admin-instance-card p,
+    .admin-user-card p {
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.62;
+      font-size: 0.94rem;
+    }
+    .admin-kpi-meta {
+      padding-top: 2px;
+      border-top: 1px solid rgba(98, 63, 49, 0.08);
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .admin-operations-grid,
+    .admin-team-grid {
+      display: grid;
+      gap: 18px;
+      align-items: start;
+    }
+    .admin-operations-grid {
+      grid-template-columns: minmax(0, 1.32fr) minmax(320px, 0.92fr);
+    }
+    .admin-team-grid {
+      grid-template-columns: minmax(0, 1.1fr) minmax(320px, 0.9fr);
+    }
+    .admin-side-stack,
+    .admin-studio-stack {
+      display: grid;
+      gap: 18px;
+    }
+    .admin-panel .panel-head {
+      padding: 20px 22px 14px;
+    }
+    .admin-panel .panel-title {
+      font-size: 1.34rem;
+    }
+    .admin-panel .admin-role-grid,
+    .admin-panel .admin-fleet-grid,
+    .admin-panel .admin-seat-list,
+    .admin-panel .admin-studio-grid {
+      padding: 18px 20px 20px;
+    }
+    .admin-role-grid,
+    .admin-seat-list,
+    .admin-fleet-grid {
+      display: grid;
+      gap: 14px;
+    }
+    .admin-fleet-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    .admin-role-card,
+    .admin-instance-card,
+    .admin-user-card {
+      border-radius: 22px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,0.72);
+      padding: 18px;
+      display: grid;
+      gap: 12px;
+    }
+    .admin-role-card {
+      background:
+        linear-gradient(180deg, rgba(255,255,255,0.78), rgba(255,255,255,0.64)),
+        radial-gradient(circle at 100% 0%, rgba(255,255,255,0.56), transparent 48%);
+    }
+    .admin-instance-card {
+      background:
+        linear-gradient(180deg, rgba(255,255,255,0.82), rgba(255,255,255,0.64)),
+        radial-gradient(circle at 100% 0%, color-mix(in srgb, var(--accentSoft) 50%, white 50%), transparent 48%);
+    }
+    .admin-instance-path {
+      padding: 12px 14px;
+      border-radius: 16px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,0.78);
+      font-family: "IBM Plex Mono", "SFMono-Regular", monospace;
+      font-size: 0.83rem;
+      line-height: 1.58;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+    .admin-instance-facts {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+    .admin-mini-stat {
+      border-radius: 16px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,0.82);
+      padding: 12px;
+      display: grid;
+      gap: 5px;
+    }
+    .admin-mini-stat strong {
+      font-size: 1.02rem;
+      line-height: 1.24;
+    }
+    .admin-section-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .admin-user-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.1fr) minmax(220px, 0.9fr);
+      gap: 12px;
+      align-items: start;
+    }
+    .admin-user-grid .admin-section-meta {
+      align-content: start;
+      justify-content: flex-start;
+    }
+    .admin-user-card .theme-badge {
+      justify-self: start;
+    }
+    .admin-audit-panel .event-feed {
+      padding: 20px 24px 24px 34px;
+    }
+    .admin-audit-panel .event-feed::before {
+      left: 34px;
+      top: 20px;
+      bottom: 20px;
+    }
+    .admin-audit-event {
+      background: rgba(255,255,255,0.66);
+      border-radius: 18px;
+      border: 1px solid var(--line);
+      padding: 16px 16px 16px 22px;
     }
     .live-indicator {
       display: inline-flex;
@@ -795,8 +1183,8 @@ __STYLE_VARS__
     .metric {
       min-height: 116px;
       padding: 16px 16px 18px;
-      border-radius: 20px;
-      background: rgba(255,255,255,0.6);
+      border-radius: 14px;
+      background: rgba(255,255,255,0.98);
       border: 1px solid var(--line);
     }
     .metric-label {
@@ -808,8 +1196,10 @@ __STYLE_VARS__
     }
     .metric-value {
       margin-top: 8px;
-      font-family: "Fraunces", "Times New Roman", serif;
-      font-size: clamp(1.8rem, 2.5vw, 3rem);
+      font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+      font-size: clamp(1.55rem, 2vw, 2.15rem);
+      font-weight: 700;
+      line-height: 1.24;
     }
     .metric-note {
       margin-top: 6px;
@@ -819,9 +1209,9 @@ __STYLE_VARS__
     }
     .panel {
       overflow: hidden;
-      border-radius: 26px;
+      border-radius: 16px;
       border: 1px solid var(--line);
-      background: var(--panel);
+      background: rgba(255,255,255,0.96);
       box-shadow: var(--shadow-soft);
     }
     .panel-head {
@@ -834,8 +1224,10 @@ __STYLE_VARS__
     }
     .panel-title {
       margin: 0;
-      font-family: "Fraunces", "Times New Roman", serif;
-      font-size: 1.4rem;
+      font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+      font-size: 1.18rem;
+      font-weight: 700;
+      line-height: 1.3;
     }
     .panel-subtitle {
       margin: 4px 0 0;
@@ -849,9 +1241,9 @@ __STYLE_VARS__
     }
     .relay {
       padding: 16px;
-      border-radius: 18px;
+      border-radius: 14px;
       border: 1px solid var(--line);
-      background: rgba(255,255,255,0.54);
+      background: rgba(255,255,255,0.98);
     }
     .relay-path {
       font-weight: 700;
@@ -859,8 +1251,10 @@ __STYLE_VARS__
     }
     .relay-count {
       margin-top: 8px;
-      font-family: "Fraunces", "Times New Roman", serif;
-      font-size: 2rem;
+      font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+      font-size: 1.5rem;
+      font-weight: 700;
+      line-height: 1.2;
     }
     .relay-meta {
       margin-top: 8px;
@@ -901,9 +1295,9 @@ __STYLE_VARS__
     }
     .agent-card,
     .task-card {
-      border-radius: 20px;
+      border-radius: 14px;
       border: 1px solid var(--line);
-      background: rgba(255,255,255,0.58);
+      background: rgba(255,255,255,0.98);
       padding: 16px;
       display: grid;
       gap: 12px;
@@ -943,9 +1337,9 @@ __STYLE_VARS__
       align-items: center;
       gap: 8px;
       padding: 7px 12px;
-      border-radius: 999px;
+      border-radius: 10px;
       font-size: 0.82rem;
-      font-weight: 700;
+      font-weight: 600;
       text-transform: uppercase;
       letter-spacing: 0.12em;
       white-space: nowrap;
@@ -969,9 +1363,9 @@ __STYLE_VARS__
     }
     .fact {
       padding: 12px;
-      border-radius: 14px;
+      border-radius: 10px;
       border: 1px solid var(--line);
-      background: rgba(255,255,255,0.62);
+      background: rgba(255,255,255,0.98);
     }
     .fact span {
       display: block;
@@ -1004,9 +1398,9 @@ __STYLE_VARS__
       align-items: center;
       gap: 8px;
       padding: 8px 12px;
-      border-radius: 999px;
+      border-radius: 10px;
       border: 1px solid var(--line);
-      background: rgba(255,255,255,0.72);
+      background: rgba(255,255,255,0.96);
       color: var(--ink);
       font-size: 0.86rem;
       line-height: 1.4;
@@ -1042,9 +1436,9 @@ __STYLE_VARS__
       gap: 12px;
     }
     .conversation-card {
-      border-radius: 20px;
+      border-radius: 14px;
       border: 1px solid var(--line);
-      background: rgba(255,255,255,0.58);
+      background: rgba(255,255,255,0.98);
       padding: 16px;
       display: grid;
       gap: 10px;
@@ -1058,7 +1452,7 @@ __STYLE_VARS__
       box-shadow: 0 16px 34px rgba(48, 36, 28, 0.09);
     }
     .conversation-card[data-active="true"] {
-      background: color-mix(in srgb, var(--accentSoft) 26%, rgba(255,255,255,0.72));
+      background: color-mix(in srgb, var(--accentSoft) 16%, rgba(255,255,255,0.98));
     }
     .agent-card-actions {
       display: flex;
@@ -1075,11 +1469,9 @@ __STYLE_VARS__
       appearance: none;
       width: 100%;
       border: 1px solid var(--line);
-      border-radius: 20px;
+      border-radius: 12px;
       padding: 14px 15px;
-      background:
-        linear-gradient(150deg, rgba(255,255,255,0.82), rgba(255,255,255,0.58)),
-        radial-gradient(circle at top right, color-mix(in srgb, var(--accentSoft) 28%, transparent), transparent 42%);
+      background: rgba(255,255,255,0.98);
       display: grid;
       gap: 8px;
       text-align: left;
@@ -1094,9 +1486,7 @@ __STYLE_VARS__
       box-shadow: 0 16px 34px rgba(48, 36, 28, 0.09);
     }
     .agent-launch-card[data-active="true"] {
-      background:
-        linear-gradient(150deg, color-mix(in srgb, var(--accentSoft) 24%, rgba(255,255,255,0.88)), rgba(255,255,255,0.68)),
-        radial-gradient(circle at top right, color-mix(in srgb, var(--accentSoft) 42%, transparent), transparent 40%);
+      background: color-mix(in srgb, var(--accentSoft) 18%, rgba(255,255,255,0.98));
     }
     .agent-launch-card strong {
       font-size: 1rem;
@@ -1293,9 +1683,10 @@ __STYLE_VARS__
     }
     .drawer-title {
       margin: 10px 0 0;
-      font-family: "Fraunces", "Times New Roman", serif;
-      font-size: 2rem;
-      line-height: 1;
+      font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+      font-size: 1.5rem;
+      font-weight: 700;
+      line-height: 1.2;
     }
     .drawer-body {
       overflow: auto;
@@ -1424,37 +1815,41 @@ __STYLE_VARS__
       letter-spacing: 0.08em;
     }
     .app-shell {
-      width: min(1720px, calc(100vw - 24px));
-      margin: 12px auto 28px;
+      width: min(1780px, calc(100vw - 32px));
+      margin: 16px auto 32px;
       display: grid;
-      grid-template-columns: 280px minmax(0, 1fr);
-      gap: 18px;
+      grid-template-columns: 292px minmax(0, 1fr);
+      gap: 20px;
       align-items: start;
     }
     .rail {
       position: sticky;
-      top: 12px;
+      top: 16px;
       display: grid;
-      gap: 14px;
+      gap: 12px;
       align-self: start;
     }
     .brand-card,
     .rail-panel,
     .topbar {
-      border-radius: 26px;
+      border-radius: 16px;
       border: 1px solid var(--line);
-      background: var(--panel);
+      background: rgba(255,255,255,0.96);
       box-shadow: var(--shadow-soft);
     }
     .brand-card,
     .rail-panel {
       padding: 18px;
     }
+    .brand-card {
+      background: rgba(255,255,255,0.98);
+    }
     .brand-card h2 {
-      margin: 12px 0 8px;
-      font-family: "Fraunces", "Times New Roman", serif;
-      font-size: 2rem;
-      line-height: 0.95;
+      margin: 10px 0 6px;
+      font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+      font-size: 1.5rem;
+      font-weight: 700;
+      line-height: 1.22;
     }
     .rail-copy,
     .topbar-subtitle,
@@ -1481,26 +1876,33 @@ __STYLE_VARS__
       appearance: none;
       width: 100%;
       text-align: left;
-      border: 1px solid var(--line);
-      border-radius: 18px;
-      background: rgba(255,255,255,0.62);
-      padding: 13px 14px;
+      border: 1px solid transparent;
+      border-radius: 10px;
+      background: transparent;
+      padding: 10px 12px;
       color: var(--ink);
       cursor: pointer;
-      font-weight: 700;
+      font-weight: 600;
       transition: transform 140ms ease-out, border-color 140ms ease-out, background 140ms ease-out;
     }
     .nav-link span {
       display: block;
-      margin-top: 4px;
+      margin-top: 5px;
       color: var(--muted);
-      font-size: 0.88rem;
+      font-size: 0.84rem;
       font-weight: 500;
+      line-height: 1.48;
     }
-    .nav-link:hover { transform: translateY(-1px); }
+    .nav-link:hover {
+      transform: translateY(-1px);
+      background: rgba(0,0,0,0.02);
+      border-color: var(--line);
+    }
     .nav-link[data-active="true"] {
-      background: color-mix(in srgb, var(--accentSoft) 36%, white 64%);
+      background:
+        linear-gradient(180deg, color-mix(in srgb, var(--accentSoft) 18%, white 82%), rgba(255,255,255,0.98));
       border-color: color-mix(in srgb, var(--accent) 28%, var(--line));
+      box-shadow: inset 2px 0 0 color-mix(in srgb, var(--accent) 72%, white 28%);
     }
     .rail-grid,
     .status-strip,
@@ -1515,15 +1917,16 @@ __STYLE_VARS__
     }
     .rail-kv {
       padding: 12px 13px;
-      border-radius: 16px;
+      border-radius: 10px;
       border: 1px solid var(--line);
-      background: rgba(255,255,255,0.58);
+      background: rgba(255,255,255,0.98);
     }
     .rail-kv strong,
     .status-card strong {
       display: block;
       margin-top: 6px;
-      font-size: 1.1rem;
+      font-size: 1rem;
+      font-weight: 700;
     }
     .workspace-shell {
       min-width: 0;
@@ -1531,7 +1934,7 @@ __STYLE_VARS__
       gap: 18px;
     }
     .topbar {
-      padding: 18px 20px;
+      padding: 18px 22px;
       display: grid;
       grid-template-columns: auto minmax(260px, 1fr) auto;
       gap: 16px;
@@ -1539,9 +1942,10 @@ __STYLE_VARS__
     }
     .topbar-title {
       margin-top: 6px;
-      font-family: "Fraunces", "Times New Roman", serif;
-      font-size: 2rem;
-      line-height: 0.95;
+      font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+      font-size: 1.8rem;
+      font-weight: 700;
+      line-height: 1.16;
     }
     .search-shell {
       display: flex;
@@ -1549,13 +1953,13 @@ __STYLE_VARS__
     }
     .search-input {
       width: 100%;
-      border-radius: 999px;
+      border-radius: 10px;
       border: 1px solid var(--line);
-      background: rgba(255,255,255,0.72);
+      background: rgba(255,255,255,0.98);
       color: var(--ink);
       padding: 13px 18px;
       outline: none;
-      box-shadow: inset 0 1px 0 rgba(255,255,255,0.55);
+      box-shadow: none;
     }
     .search-input:focus {
       border-color: color-mix(in srgb, var(--accent) 34%, var(--line));
@@ -1587,9 +1991,9 @@ __STYLE_VARS__
     .theme-card,
     .command-card {
       padding: 16px;
-      border-radius: 20px;
+      border-radius: 14px;
       border: 1px solid var(--line);
-      background: rgba(255,255,255,0.62);
+      background: rgba(255,255,255,0.98);
     }
     .status-card {
       min-height: 112px;
@@ -1613,11 +2017,11 @@ __STYLE_VARS__
     .filter-chip {
       appearance: none;
       border: 1px solid var(--line);
-      border-radius: 999px;
-      background: rgba(255,255,255,0.72);
+      border-radius: 10px;
+      background: rgba(255,255,255,0.94);
       color: var(--ink);
       padding: 8px 12px;
-      font-weight: 700;
+      font-weight: 600;
       cursor: pointer;
     }
     .filter-chip[data-active="true"] {
@@ -1651,9 +2055,9 @@ __STYLE_VARS__
     .path-line,
     .code-line {
       padding: 12px 14px;
-      border-radius: 16px;
+      border-radius: 10px;
       border: 1px solid var(--line);
-      background: rgba(255,255,255,0.7);
+      background: rgba(255,255,255,0.98);
       font-family: "IBM Plex Mono", "SFMono-Regular", monospace;
       font-size: 0.84rem;
       white-space: pre-wrap;
@@ -1664,13 +2068,13 @@ __STYLE_VARS__
       align-items: center;
       gap: 8px;
       padding: 7px 11px;
-      border-radius: 999px;
+      border-radius: 10px;
       border: 1px solid var(--line);
       font-size: 0.8rem;
       font-weight: 700;
       text-transform: uppercase;
       letter-spacing: 0.08em;
-      background: rgba(255,255,255,0.7);
+      background: rgba(255,255,255,0.96);
     }
     .theme-card[data-current="true"] {
       border-color: color-mix(in srgb, var(--accent) 28%, var(--line));
@@ -1757,7 +2161,48 @@ __STYLE_VARS__
       70% { box-shadow: 0 0 0 12px color-mix(in srgb, currentColor 0%, transparent); }
       100% { box-shadow: 0 0 0 0 color-mix(in srgb, currentColor 0%, transparent); }
     }
-    @media (max-width: 1240px) {
+    @media (max-width: 1360px) {
+      .app-shell { grid-template-columns: 258px minmax(0, 1fr); }
+      .topbar {
+        grid-template-columns: minmax(0, 1fr) auto;
+        align-items: start;
+      }
+      .search-shell {
+        grid-column: 1 / -1;
+      }
+      .overview-grid {
+        grid-template-columns: 1fr 1fr;
+      }
+      .overview-grid > .panel:last-child {
+        grid-column: 1 / -1;
+      }
+      .workspace-hero-head,
+      .workspace-split {
+        grid-template-columns: 1fr;
+      }
+      .workspace-note-card {
+        justify-self: start;
+      }
+      .workspace-kpi-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+      .admin-hero-head,
+      .admin-operations-grid,
+      .admin-team-grid {
+        grid-template-columns: 1fr;
+      }
+      .admin-hero-side {
+        justify-items: start;
+      }
+      .admin-chip-row {
+        justify-content: flex-start;
+      }
+      .admin-kpi-grid,
+      .admin-fleet-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+    }
+    @media (max-width: 1040px) {
       .app-shell { grid-template-columns: 1fr; }
       .rail { position: static; }
       .topbar { grid-template-columns: 1fr; }
@@ -1774,7 +2219,9 @@ __STYLE_VARS__
       .app-shell { width: min(100vw - 14px, 1720px); margin: 8px auto 22px; }
       .app-shell[data-rail="collapsed"] { grid-template-columns: 1fr; }
       .hero { padding: 22px 18px 20px; border-radius: 24px; }
+      .workspace-hero { padding: 22px 18px; }
       .metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .workspace-kpi-grid { grid-template-columns: 1fr; }
       .transcript-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .relay-grid { grid-template-columns: 1fr; }
       .status-strip { grid-template-columns: 1fr 1fr; }
@@ -1785,6 +2232,27 @@ __STYLE_VARS__
       .event-feed::before { left: 16px; }
       .event { padding-left: 20px; }
       .event::before { left: -15px; }
+      .admin-hero { padding: 22px 18px; }
+      .admin-kpi-grid,
+      .admin-fleet-grid,
+      .admin-instance-facts,
+      .admin-user-grid {
+        grid-template-columns: 1fr;
+      }
+      .admin-panel .admin-role-grid,
+      .admin-panel .admin-fleet-grid,
+      .admin-panel .admin-seat-list,
+      .admin-panel .admin-studio-grid {
+        padding: 16px;
+      }
+      .admin-audit-panel .event-feed {
+        padding: 16px 16px 18px 24px;
+      }
+      .admin-audit-panel .event-feed::before {
+        left: 24px;
+        top: 16px;
+        bottom: 16px;
+      }
       .drawer {
         top: 8px;
         right: 8px;
@@ -1927,9 +2395,36 @@ __STYLE_VARS__
           </div>
         </section>
 
-        <section class="view" data-view="agents" hidden>
-          <div class="status-strip" id="agent-status-strip"></div>
-          <section class="panel">
+        <section class="view operations-view" data-view="agents" hidden>
+          <section class="workspace-hero">
+            <div class="workspace-hero-head">
+              <div>
+                <div class="eyebrow">Roster Control</div>
+                <h1 class="workspace-hero-title">Agent 运营台</h1>
+                <p class="workspace-hero-copy">参考 Ant Design 的企业后台方式，把 roster、负载、状态分布和协作入口收口成一张运营页。你应该先看到风险和负载，再决定点进谁。</p>
+              </div>
+              <div class="workspace-note-card">
+                <span>运营原则</span>
+                <strong>先看状态分布，再追高负载 Agent。</strong>
+                <p>推进中、待反馈、阻塞和空闲必须同时看，避免只盯着最热闹的那一个。</p>
+              </div>
+            </div>
+            <div class="workspace-kpi-grid" id="agents-summary-list"></div>
+          </section>
+
+          <section class="panel workspace-panel">
+            <div class="panel-head">
+              <div>
+                <h2 class="panel-title">团队态势</h2>
+                <p class="panel-subtitle">把推进、等待、阻塞、待命和空闲分层摆出来，先看清整支团队的温度分布。</p>
+              </div>
+            </div>
+            <div class="panel-body">
+              <div class="status-strip" id="agent-status-strip"></div>
+            </div>
+          </section>
+
+          <section class="panel workspace-panel">
             <div class="panel-head">
               <div>
                 <h2 class="panel-title">Agent 运营台</h2>
@@ -1940,9 +2435,25 @@ __STYLE_VARS__
           </section>
         </section>
 
-        <section class="view" data-view="tasks" hidden>
-          <div class="split-grid">
-            <section class="panel">
+        <section class="view operations-view" data-view="tasks" hidden>
+          <section class="workspace-hero">
+            <div class="workspace-hero-head">
+              <div>
+                <div class="eyebrow">Delivery River</div>
+                <h1 class="workspace-hero-title">交付执行台</h1>
+                <p class="workspace-hero-copy">参考 Ant Design Pro 的工作台思路，把任务创建、焦点上下文、执行河道、交付物和 runbook 放进同一页，让交付推进更像产品后台，而不是单纯列表。</p>
+              </div>
+              <div class="workspace-note-card">
+                <span>交付原则</span>
+                <strong>创建、推进、阻塞、归档要在同一工作流里完成。</strong>
+                <p>先确认焦点任务，再决定是继续推进、补背景，还是转入阻塞处理和结果归档。</p>
+              </div>
+            </div>
+            <div class="workspace-kpi-grid" id="tasks-summary-list"></div>
+          </section>
+
+          <div class="workspace-split">
+            <section class="panel workspace-panel">
               <div class="panel-head">
                 <div>
                   <h2 class="panel-title">操作工作台</h2>
@@ -1952,7 +2463,7 @@ __STYLE_VARS__
               <div class="studio-grid" id="task-action-studio"></div>
             </section>
 
-            <section class="panel">
+            <section class="panel workspace-panel">
               <div class="panel-head">
                 <div>
                   <h2 class="panel-title">当前焦点任务</h2>
@@ -1963,7 +2474,7 @@ __STYLE_VARS__
             </section>
           </div>
 
-          <section class="panel">
+          <section class="panel workspace-panel">
             <div class="panel-head">
               <div>
                 <h2 class="panel-title">交付执行台</h2>
@@ -1974,8 +2485,8 @@ __STYLE_VARS__
             <div class="task-list" id="tasks-page-list"></div>
           </section>
 
-          <div class="split-grid">
-            <section class="panel">
+          <div class="workspace-split">
+            <section class="panel workspace-panel">
               <div class="panel-head">
                 <div>
                   <h2 class="panel-title">交付物</h2>
@@ -1985,7 +2496,7 @@ __STYLE_VARS__
               <div class="deliverable-list" id="deliverables-list"></div>
             </section>
 
-            <section class="panel">
+            <section class="panel workspace-panel">
               <div class="panel-head">
                 <div>
                   <h2 class="panel-title">本地操作</h2>
@@ -1997,31 +2508,47 @@ __STYLE_VARS__
           </div>
         </section>
 
-        <section class="view" data-view="conversations" hidden>
-          <div class="split-grid">
-            <section class="panel">
-              <div class="panel-head">
-                <div>
-                  <h2 class="panel-title">会话总览</h2>
-                  <p class="panel-subtitle">现在你不只是看协同，还能直接进入 OpenClaw 的真实 session，或按 Agent 直达主会话继续对话。</p>
-                </div>
+        <section class="view operations-view" data-view="conversations" hidden>
+          <section class="workspace-hero">
+            <div class="workspace-hero-head">
+              <div>
+                <div class="eyebrow">Dialogue Ops</div>
+                <h1 class="workspace-hero-title">会话中心</h1>
+                <p class="workspace-hero-copy">参考 Ant Design 的企业控制台交互，把会话列表、直达主会话、指令入口和 transcript 分区管理。这里既能看，也能继续对话和调度。</p>
               </div>
-              <div class="deliverable-list" id="conversation-summary-list"></div>
-            </section>
+              <div class="workspace-note-card">
+                <span>会话原则</span>
+                <strong>先定目标 Agent，再决定是否接着原会话说。</strong>
+                <p>把“找会话”和“继续协作”分开，可以让产品更像指挥台，而不是消息抽屉。</p>
+              </div>
+            </div>
+            <div class="workspace-kpi-grid" id="conversation-summary-list"></div>
+          </section>
 
-            <section class="panel">
+          <div class="workspace-split">
+            <section class="panel workspace-panel">
               <div class="panel-head">
                 <div>
                   <h2 class="panel-title">对话命令</h2>
-                  <p class="panel-subtitle">产品里可以直接聊，终端里也保留官方命令入口，方便自动化和排障。</p>
+                  <p class="panel-subtitle">保留官方命令入口，既能在产品内操作，也能随时回到终端做排障和自动化。</p>
                 </div>
               </div>
               <div class="command-list" id="conversation-command-list"></div>
             </section>
+
+            <section class="panel workspace-panel">
+              <div class="panel-head">
+                <div>
+                  <h2 class="panel-title">会话工作台</h2>
+                  <p class="panel-subtitle">先点亮目标 Agent 或主会话，再在这里直接继续对话，把“查看”和“操作”放在一个工作区里。</p>
+                </div>
+              </div>
+              <div class="studio-grid" id="conversation-studio"></div>
+            </section>
           </div>
 
           <div class="conversation-shell">
-            <section class="panel">
+            <section class="panel workspace-panel">
               <div class="panel-head">
                 <div>
                   <h2 class="panel-title">真实会话列表</h2>
@@ -2031,14 +2558,13 @@ __STYLE_VARS__
               <div class="conversation-list" id="conversation-list"></div>
             </section>
 
-            <section class="panel">
+            <section class="panel workspace-panel">
               <div class="panel-head">
                 <div>
                   <h2 class="panel-title">对话现场</h2>
                   <p class="panel-subtitle">查看选中会话的真实 transcript，并直接继续发问。未选会话时，会默认发给所选 Agent 的主会话。</p>
                 </div>
               </div>
-              <div class="studio-grid" id="conversation-studio"></div>
               <div class="transcript-stream" id="conversation-transcript"></div>
             </section>
           </div>
@@ -2214,78 +2740,91 @@ __STYLE_VARS__
           </section>
         </section>
 
-        <section class="view" data-view="admin" hidden>
-          <div class="split-grid">
-            <section class="panel">
-              <div class="panel-head">
-                <div>
-                  <h2 class="panel-title">商业后台总览</h2>
-                  <p class="panel-subtitle">把席位、权限、产品目录和操作治理放到一个更像商业后台的入口里。</p>
+        <section class="view admin-view" data-view="admin" hidden>
+          <section class="admin-hero">
+            <div class="admin-hero-head">
+              <div>
+                <div class="eyebrow">Control Plane</div>
+                <h1 class="admin-hero-title">商业后台控制平面</h1>
+                <p class="admin-hero-copy">参考 Ant Design 的后台产品结构，把实例舰队、席位治理、权限边界和审计留痕统一到一个管理者视角里，方便你按产品运营方式持续管理这套多 Agent 系统。</p>
+              </div>
+              <div class="admin-hero-side">
+                <div class="admin-chip-row">
+                  <span class="admin-chip">Fleet Registry</span>
+                  <span class="admin-chip">Seat Governance</span>
+                  <span class="admin-chip">Audit Trail</span>
+                </div>
+                <div class="admin-note-card">
+                  <span>运营原则</span>
+                  <strong>一屏内先看经营指标，再做实例与成员治理。</strong>
+                  <p>这页只保留真正和产品运营相关的对象，不再把后台做成一组平铺的说明卡片。</p>
                 </div>
               </div>
-              <div class="deliverable-list" id="admin-summary-list"></div>
-            </section>
+            </div>
+            <div class="admin-kpi-grid" id="admin-summary-list"></div>
+          </section>
 
-            <section class="panel">
-              <div class="panel-head">
-                <div>
-                  <h2 class="panel-title">角色矩阵</h2>
-                  <p class="panel-subtitle">清楚知道 Owner、Operator、Viewer 各自能做什么，避免共享 token 带来的权限扩散。</p>
-                </div>
-              </div>
-              <div class="deliverable-list" id="admin-role-list"></div>
-            </section>
-          </div>
-
-          <div class="split-grid">
-            <section class="panel">
+          <div class="admin-operations-grid">
+            <section class="panel admin-panel">
               <div class="panel-head">
                 <div>
                   <h2 class="panel-title">安装舰队</h2>
-                  <p class="panel-subtitle">把多套 OpenClaw 安装实例登记到同一个本地控制平面里，先看清“现在手上到底有几套系统在跑”。</p>
+                  <p class="panel-subtitle">先看清现在到底有几套系统在跑、哪一套可达、哪一套正在承载活跃任务。</p>
                 </div>
               </div>
-              <div class="deliverable-list" id="admin-instance-list"></div>
+              <div class="deliverable-list admin-fleet-grid" id="admin-instance-list"></div>
             </section>
 
-            <section class="panel">
-              <div class="panel-head">
-                <div>
-                  <h2 class="panel-title">登记实例</h2>
-                  <p class="panel-subtitle">Owner 可以把其他本地 OpenClaw 安装目录登记进来，形成第一版多实例管理入口。</p>
+            <div class="admin-side-stack">
+              <section class="panel admin-panel">
+                <div class="panel-head">
+                  <div>
+                    <h2 class="panel-title">角色矩阵</h2>
+                    <p class="panel-subtitle">把 Owner、Operator、Viewer 的权限边界讲清楚，避免后台继续靠共享 token 运转。</p>
+                  </div>
                 </div>
-              </div>
-              <div class="studio-grid" id="admin-instance-studio"></div>
-            </section>
+                <div class="deliverable-list admin-role-grid" id="admin-role-list"></div>
+              </section>
+
+              <section class="panel admin-panel">
+                <div class="panel-head">
+                  <div>
+                    <h2 class="panel-title">登记实例</h2>
+                    <p class="panel-subtitle">Owner 在这里把其他本地安装纳入控制平面，开始形成多实例运营能力。</p>
+                  </div>
+                </div>
+                <div class="studio-grid admin-studio-grid" id="admin-instance-studio"></div>
+              </section>
+            </div>
           </div>
 
-          <div class="split-grid">
-            <section class="panel">
+          <div class="admin-team-grid">
+            <section class="panel admin-panel">
               <div class="panel-head">
                 <div>
                   <h2 class="panel-title">团队席位</h2>
-                  <p class="panel-subtitle">现在开始按人管理访问，而不是继续靠单一兜底 token。</p>
+                  <p class="panel-subtitle">按人管理访问、角色和状态，让产品的使用方式从单人控制台升级到团队后台。</p>
                 </div>
               </div>
-              <div class="deliverable-list" id="admin-user-list"></div>
+              <div class="deliverable-list admin-seat-list" id="admin-user-list"></div>
             </section>
 
-            <section class="panel">
+            <section class="panel admin-panel">
               <div class="panel-head">
                 <div>
-                  <h2 class="panel-title">新增成员</h2>
-                  <p class="panel-subtitle">Owner 可以在这里直接补齐 operator / viewer / owner 席位。</p>
+                  <h2 class="panel-title">席位工作台</h2>
+                  <p class="panel-subtitle">Owner 可以在这里补齐新成员、调整权限和重置账号，不需要再切回终端做治理动作。</p>
                 </div>
               </div>
-              <div class="studio-grid" id="admin-user-studio"></div>
+              <div class="studio-grid admin-studio-grid" id="admin-user-studio"></div>
             </section>
           </div>
 
-          <section class="panel">
+          <section class="panel admin-panel admin-audit-panel">
             <div class="panel-head">
               <div>
                 <h2 class="panel-title">操作审计</h2>
-                <p class="panel-subtitle">登录、任务推进、主题切换和成员管理都会沉淀到这里，开始具备商业后台应有的治理能力。</p>
+                <p class="panel-subtitle">登录、任务推进、主题切换、成员治理和实例登记都会沉淀在这里，便于做事后追溯和责任界定。</p>
               </div>
             </div>
             <div class="event-feed" id="admin-audit-feed"></div>
@@ -2349,7 +2888,7 @@ __STYLE_VARS__
       },
       admin: {
         title: "商业后台",
-        subtitle: "开始按账号、角色、审计和治理能力来运营这套多 Agent 产品。",
+        subtitle: "用控制平面视角经营这套多 Agent 产品：舰队、席位、权限与审计都在这里。",
       },
     };
 
@@ -2370,8 +2909,10 @@ __STYLE_VARS__
       overviewAgentGrid: document.getElementById("overview-agent-grid"),
       overviewTaskList: document.getElementById("overview-task-list"),
       overviewEventFeed: document.getElementById("overview-event-feed"),
+      agentsSummaryList: document.getElementById("agents-summary-list"),
       agentStatusStrip: document.getElementById("agent-status-strip"),
       agentsPageGrid: document.getElementById("agents-page-grid"),
+      tasksSummaryList: document.getElementById("tasks-summary-list"),
       taskFilterRow: document.getElementById("task-filter-row"),
       taskActionStudio: document.getElementById("task-action-studio"),
       taskFocusCard: document.getElementById("task-focus-card"),
@@ -2891,6 +3432,33 @@ __STYLE_VARS__
       });
     }
 
+    function renderWorkspaceKpiCards(container, items) {
+      clearNode(container);
+      if (!items.length) {
+        container.append(el("div", "empty", "当前还没有可展示的摘要。"));
+        return;
+      }
+      items.forEach((item) => {
+        const card = el("div", "workspace-kpi-card");
+        card.append(el("span", "", item.label));
+        card.append(el("strong", "", item.value));
+        card.append(el("p", "", item.note));
+        if (item.meta) {
+          card.append(el("div", "workspace-kpi-meta", item.meta));
+        }
+        container.append(card);
+      });
+    }
+
+    function currentTaskFilterLabel() {
+      return {
+        active: "活跃任务",
+        blocked: "阻塞任务",
+        done: "已完成",
+        all: "全部任务",
+      }[taskFilter] || "任务";
+    }
+
     function renderRelaysInto(container, relays, emptyText) {
       clearNode(container);
       if (!relays.length) {
@@ -3308,48 +3876,62 @@ __STYLE_VARS__
 
       const summaries = [
         {
+          title: "安装舰队",
+          body: `已登记 ${(admin.instanceSummary || {}).total || 0} 套安装`,
+          meta: `可达 ${(admin.instanceSummary || {}).reachable || 0} · 缺失 ${(admin.instanceSummary || {}).missing || 0} · 异常 ${(admin.instanceSummary || {}).broken || 0}`,
+        },
+        {
+          title: "现场负载",
+          body: `${(admin.instanceSummary || {}).activeTasks || 0} 个活跃任务`,
+          meta: "把实例活跃度和阻塞态放到同一个经营视角里持续观察。",
+        },
+        {
           title: "团队席位",
-          body: `${(admin.seatSummary || {}).total || 0} 个账号已经纳入产品权限体系。`,
+          body: `${(admin.seatSummary || {}).total || 0} 个账号已启用`,
           meta: `Owner ${(admin.seatSummary || {}).owner || 0} · Operator ${(admin.seatSummary || {}).operator || 0} · Viewer ${(admin.seatSummary || {}).viewer || 0}`,
         },
         {
           title: "治理动作",
-          body: `最近 24 小时记录了 ${(admin.seatSummary || {}).actions24h || 0} 条治理动作。`,
+          body: `${(admin.seatSummary || {}).actions24h || 0} 条操作 / 24h`,
           meta: `失败登录 ${(admin.seatSummary || {}).failedLogins24h || 0} 次`,
         },
         {
           title: "席位状态",
-          body: `激活 ${(admin.seatSummary || {}).active || 0} 个 · 停用 ${(admin.seatSummary || {}).suspended || 0} 个`,
+          body: `激活 ${(admin.seatSummary || {}).active || 0} · 停用 ${(admin.seatSummary || {}).suspended || 0}`,
           meta: hasSeatVisibility ? "Owner 可以直接在这里调整角色、停用席位和重置密码。" : "当前账号只看到聚合统计，不暴露具体席位名单。",
         },
         {
           title: "源仓库目录",
-          body: (admin.workspace || {}).projectDir || "当前安装未记录仓库目录。",
+          body: (admin.workspace || {}).projectDir ? "已连接仓库源目录" : "仓库目录缺失",
           meta: "主题切换和运行时脚本会使用这个源目录。",
         },
         {
           title: "产品数据内核",
-          body: (admin.workspace || {}).storagePath || "当前还没有记录产品数据库路径。",
+          body: (admin.workspace || {}).storagePath ? "SQLite 产品内核在线" : "数据库路径缺失",
           meta: "1.14.0 起账号与审计优先走 SQLite 存储层，而不是分散的 JSON 文件。",
-        },
-        {
-          title: "安装舰队",
-          body: `已登记 ${(admin.instanceSummary || {}).total || 0} 套 OpenClaw 安装。`,
-          meta: `可达 ${(admin.instanceSummary || {}).reachable || 0} · 缺失 ${(admin.instanceSummary || {}).missing || 0} · 异常 ${(admin.instanceSummary || {}).broken || 0} · 活跃任务 ${(admin.instanceSummary || {}).activeTasks || 0}`,
         },
       ];
       summaries.forEach((item) => {
-        const card = el("div", "deliverable-card");
-        card.append(el("div", "deliverable-title", item.title));
-        card.append(el("div", "command-desc", item.body));
-        card.append(el("div", "path-line", item.meta));
+        const card = el("div", "admin-kpi-card");
+        card.append(el("span", "", item.title));
+        card.append(el("strong", "", item.body));
+        card.append(el("p", "", item.meta));
+        if (item.title === "源仓库目录" && (admin.workspace || {}).projectDir) {
+          card.append(el("div", "admin-kpi-meta", (admin.workspace || {}).projectDir));
+        } else if (item.title === "产品数据内核" && (admin.workspace || {}).storagePath) {
+          card.append(el("div", "admin-kpi-meta", (admin.workspace || {}).storagePath));
+        } else if (item.title === "现场负载") {
+          card.append(el("div", "admin-kpi-meta", `阻塞任务 ${(admin.instanceSummary || {}).blockedTasks || 0} 个`));
+        } else {
+          card.append(el("div", "admin-kpi-meta", item.meta));
+        }
         refs.adminSummaryList.append(card);
       });
 
       (admin.roleMatrix || []).forEach((role) => {
-        const card = el("div", "deliverable-card");
+        const card = el("div", "admin-role-card");
         card.append(el("div", "deliverable-title", `${role.label} · ${role.role}`));
-        card.append(el("div", "command-desc", role.description));
+        card.append(el("p", "", role.description));
         const chips = el("div", "drawer-chip-row");
         [
           ["读数据", role.permissions.read],
@@ -3372,7 +3954,7 @@ __STYLE_VARS__
         refs.adminInstanceList.append(el("div", "empty", "当前还没有登记任何 OpenClaw 安装实例。"));
       } else {
         instances.forEach((instance) => {
-          const card = el("div", "deliverable-card");
+          const card = el("div", "admin-instance-card");
           const head = el("div", "deliverable-head");
           const left = el("div");
           left.append(el("div", "deliverable-title", instance.label || instance.openclawDir));
@@ -3381,19 +3963,24 @@ __STYLE_VARS__
           const toneMap = { current: "active", ready: "standby", broken: "blocked", missing: "blocked" };
           head.append(el("div", `status-pill status-${toneMap[instance.status] || "idle"}`, instance.statusLabel || instance.status || "未知"));
           card.append(head);
-          card.append(el("div", "command-desc", instance.statusNote || "本地安装实例。"));
-          card.append(el("div", "path-line", instance.openclawDir || "未记录目录"));
+          card.append(el("p", "", instance.statusNote || "本地安装实例。"));
+          card.append(el("div", "admin-instance-path", instance.openclawDir || "未记录目录"));
           if (instance.projectDir) {
-            card.append(el("div", "path-line", `源仓库：${instance.projectDir}`));
+            card.append(el("div", "admin-instance-path", `源仓库：${instance.projectDir}`));
           }
-          const chips = el("div", "drawer-chip-row");
+          const facts = el("div", "admin-instance-facts");
           [
-            `${instance.agentCount || 0} 个 Agent`,
-            `${instance.activeTasks || 0} 个活跃任务`,
-            `${instance.blockedTasks || 0} 个阻塞任务`,
-            instance.updatedAgo ? `最近快照 ${instance.updatedAgo}` : "还没有快照",
-          ].forEach((label) => chips.append(el("span", "drawer-chip", label)));
-          card.append(chips);
+            ["Agents", `${instance.agentCount || 0} 个`],
+            ["Active", `${instance.activeTasks || 0} 个`],
+            ["Blocked", `${instance.blockedTasks || 0} 个`],
+            ["Snapshot", instance.updatedAgo || "等待快照"],
+          ].forEach(([label, value]) => {
+            const fact = el("div", "admin-mini-stat");
+            fact.append(el("span", "", label));
+            fact.append(el("strong", "", String(value)));
+            facts.append(fact);
+          });
+          card.append(facts);
           const actions = el("div", "action-footer");
           actions.append(makeCopyButton(instance.openclawDir || "", "复制目录"));
           if (instance.projectDir) {
@@ -3477,7 +4064,7 @@ __STYLE_VARS__
         refs.adminUserList.append(el("div", "empty", message));
       } else {
         users.forEach((user) => {
-          const card = el("div", "deliverable-card");
+          const card = el("div", "admin-user-card");
           const head = el("div", "deliverable-head");
           const left = el("div");
           left.append(el("div", "deliverable-title", user.displayName));
@@ -3485,8 +4072,19 @@ __STYLE_VARS__
           head.append(left);
           head.append(el("div", "theme-badge", user.status || "active"));
           card.append(head);
-          card.append(el("div", "command-desc", user.roleDescription || "团队成员"));
-          card.append(el("div", "path-line", `创建于 ${formatClock(user.createdAt)} · 最近登录 ${user.lastLoginAt ? formatClock(user.lastLoginAt) : "还没有"}`));
+          const grid = el("div", "admin-user-grid");
+          const primary = el("div");
+          primary.append(el("p", "", user.roleDescription || "团队成员"));
+          primary.append(el("div", "list-meta", `最近登录 ${user.lastLoginAt ? formatClock(user.lastLoginAt) : "还没有"}`));
+          grid.append(primary);
+          const meta = el("div", "admin-section-meta");
+          [
+            `角色 ${user.roleLabel || user.role || "未知"}`,
+            `状态 ${user.status || "active"}`,
+            `创建于 ${user.createdAt ? formatClock(user.createdAt) : "未知时间"}`,
+          ].forEach((label) => meta.append(el("span", "drawer-chip", label)));
+          grid.append(meta);
+          card.append(grid);
           refs.adminUserList.append(card);
         });
       }
@@ -3676,7 +4274,7 @@ __STYLE_VARS__
         refs.adminAuditFeed.append(el("div", "empty", "当前还没有审计记录。下一次登录、任务操作或主题切换后会开始沉淀。"));
       } else {
         (admin.auditEvents || []).forEach((event) => {
-          const card = el("article", `event event-${event.outcome === "success" ? "progress" : "flow"}`);
+          const card = el("article", `event admin-audit-event event-${event.outcome === "success" ? "progress" : "flow"}`);
           const head = el("div", "event-head");
           const title = el("div");
           title.append(el("div", "event-title", `${event.actor} · ${event.action}`));
@@ -3694,6 +4292,89 @@ __STYLE_VARS__
           refs.adminAuditFeed.append(card);
         });
       }
+    }
+
+    function renderAgentsSummary() {
+      const agents = filteredAgents();
+      const counts = { active: 0, waiting: 0, blocked: 0, standby: 0, idle: 0 };
+      let totalActiveTasks = 0;
+      let totalBlockedTasks = 0;
+      let totalHandoffs = 0;
+      agents.forEach((agent) => {
+        counts[agent.status] = (counts[agent.status] || 0) + 1;
+        totalActiveTasks += Number(agent.activeTasks || 0);
+        totalBlockedTasks += Number(agent.blockedTasks || 0);
+        totalHandoffs += Number(agent.handoffs24h || 0);
+      });
+      const mostLoaded = [...agents].sort((left, right) => {
+        const leftScore = Number(left.activeTasks || 0) * 10 + Number(left.blockedTasks || 0);
+        const rightScore = Number(right.activeTasks || 0) * 10 + Number(right.blockedTasks || 0);
+        return rightScore - leftScore;
+      })[0] || null;
+      const highlighted = [...agents].find((agent) => agent.focus) || mostLoaded;
+      renderWorkspaceKpiCards(refs.agentsSummaryList, [
+        {
+          label: "团队覆盖",
+          value: `${agents.length} 个 Agent`,
+          note: `推进中 ${counts.active || 0} · 待反馈 ${counts.waiting || 0} · 空闲 ${counts.idle || 0}`,
+          meta: `当前路由 Agent：${state.routerAgentId || "未知"}`,
+        },
+        {
+          label: "在手负载",
+          value: `${totalActiveTasks} 个任务`,
+          note: `阻塞 ${totalBlockedTasks} · 24h 接力 ${totalHandoffs}`,
+          meta: mostLoaded ? `当前最忙：${mostLoaded.title} · ${mostLoaded.activeTasks} 个在手任务` : "当前没有高负载 Agent。",
+        },
+        {
+          label: "信号温度",
+          value: `${(counts.active || 0) + (counts.standby || 0)} 个有现场感`,
+          note: `待命 ${counts.standby || 0} · 阻塞 ${counts.blocked || 0}`,
+          meta: highlighted ? `${highlighted.title}：${highlighted.focus || "最近有新的 progress signal。"}` : "等待新的 progress signal。",
+        },
+        {
+          label: "运营重点",
+          value: mostLoaded ? mostLoaded.title : "暂无高压点",
+          note: mostLoaded ? `${mostLoaded.name} · 最近信号 ${mostLoaded.lastSeenAgo}` : "当前所有 Agent 负载比较均衡。",
+          meta: mostLoaded ? `${mostLoaded.blockedTasks || 0} 个阻塞 · ${mostLoaded.handoffs24h || 0} 次接力` : "继续观察任务流入和状态变化。",
+        },
+      ]);
+    }
+
+    function renderTasksSummary() {
+      const tasks = filteredTasks();
+      const activeCount = tasks.filter((task) => task.active).length;
+      const blockedCount = tasks.filter((task) => task.blocked).length;
+      const doneCount = tasks.filter((task) => normalizeText(task.state) === "done").length;
+      const ratios = tasks.map((task) => Number((task.todo || {}).ratio || 0));
+      const averageRatio = ratios.length ? Math.round(ratios.reduce((sum, value) => sum + value, 0) / ratios.length) : 0;
+      const mostAdvanced = [...tasks].sort((left, right) => Number((right.todo || {}).ratio || 0) - Number((left.todo || {}).ratio || 0))[0] || null;
+      const focusTask = currentTaskForStudio();
+      renderWorkspaceKpiCards(refs.tasksSummaryList, [
+        {
+          label: "筛选结果",
+          value: `${tasks.length} 条任务`,
+          note: `当前视图：${currentTaskFilterLabel()} · 交付物 ${filteredDeliverables().length} 个`,
+          meta: tasks.length ? "先看聚焦任务，再判断要推进还是归档。" : "当前筛选下还没有任务。",
+        },
+        {
+          label: "执行状态",
+          value: `${activeCount} 条在推进`,
+          note: `阻塞 ${blockedCount} · 已完成 ${doneCount}`,
+          meta: activeCount ? "交付河道里仍有真实推进信号。" : "当前没有活跃中的任务。",
+        },
+        {
+          label: "Todo 体感",
+          value: `${averageRatio}% 平均完成度`,
+          note: mostAdvanced ? `最高进度 ${mostAdvanced.todo?.ratio || 0}% · ${mostAdvanced.id}` : "当前没有可计算的 Todo 进度。",
+          meta: mostAdvanced ? mostAdvanced.title : "任务还没形成明确的 Todo 拆分。",
+        },
+        {
+          label: "焦点任务",
+          value: focusTask ? focusTask.id : "尚未选中",
+          note: focusTask ? `${focusTask.title} · ${focusTask.currentAgentLabel || focusTask.org || "未知负责人"}` : "打开任务卡片后，这里会跟着变化。",
+          meta: focusTask ? (focusTask.currentUpdate || "当前没有最近进展说明。") : "先从执行台里点开一条任务。",
+        },
+      ]);
     }
 
     function renderStatusStrip() {
@@ -4127,11 +4808,13 @@ __STYLE_VARS__
     }
 
     function renderAgentsView() {
+      renderAgentsSummary();
       renderStatusStrip();
       renderAgentsInto(refs.agentsPageGrid, filteredAgents(), "当前没有匹配的 Agent。");
     }
 
     function renderTasksView() {
+      renderTasksSummary();
       renderTaskActionStudio();
       renderTaskFocusCard();
       renderTaskFilters();
@@ -4288,38 +4971,35 @@ __STYLE_VARS__
     }
 
     function renderConversationSummary() {
-      clearNode(refs.conversationSummaryList);
       const conversations = state.conversations || {};
       const selected = currentConversationSession();
       const targetAgent = currentConversationTargetAgent();
-      [
+      renderWorkspaceKpiCards(refs.conversationSummaryList, [
         {
-          title: "真实会话数",
-          body: `当前共识别 ${(conversations.summary || {}).total || 0} 个 OpenClaw session。`,
-          meta: `最近 24 小时活跃 ${(conversations.summary || {}).active24h || 0} · 可继续对话 ${(conversations.summary || {}).talkable || 0}`,
+          label: "真实会话数",
+          value: `${(conversations.summary || {}).total || 0} 个`,
+          note: `24 小时活跃 ${(conversations.summary || {}).active24h || 0} · 可继续对话 ${(conversations.summary || {}).talkable || 0}`,
+          meta: "产品直接读取 OpenClaw sessions，而不是自建影子消息系统。",
         },
         {
-          title: "当前焦点",
-          body: selected ? selected.label : targetAgent ? `${targetAgent.title} 主会话` : "还没有选中会话。",
-          meta: selected ? `${selected.agentLabel} · ${selected.updatedAgo}` : targetAgent ? `${targetAgent.id} · 现在可以直接向它发问` : "选择任意会话后，这里会显示会话上下文。",
+          label: "当前焦点",
+          value: selected ? selected.label : targetAgent ? `${targetAgent.title} 主会话` : "还没有选中会话",
+          note: selected ? `${selected.agentLabel} · ${selected.updatedAgo}` : targetAgent ? `${targetAgent.id} · 现在可以直接向它发问` : "选择任意会话后，这里会显示会话上下文。",
+          meta: selected ? (selected.preview || "当前没有最近摘要。") : "你也可以直接点亮某个 Agent 的主会话。",
         },
         {
-          title: "对话模式",
-          body: supportsConversationWrite() ? "Owner / Operator 可以直接在产品里继续向任意 Agent 发问。" : "当前账号只有查看 transcript 的权限。",
-          meta: "Viewer 只读，避免把生产 Agent 入口完全开放；Owner / Operator 则可按 Agent 直达主会话。",
+          label: "对话模式",
+          value: supportsConversationWrite() ? "可直接继续发问" : "当前只读",
+          note: supportsConversationWrite() ? "Owner / Operator 可以直接在产品里继续向任意 Agent 发问。" : "当前账号只有查看 transcript 的权限。",
+          meta: "Viewer 只读，Owner / Operator 才能把产品当作实时协作入口。",
         },
         {
-          title: "接入方式",
-          body: "产品前端直接调用 OpenClaw 的 sessions 和 agent CLI，不另建影子消息系统。",
+          label: "接入方式",
+          value: "原生 OpenClaw 会话",
+          note: "产品前端直接调用 OpenClaw 的 sessions 和 agent CLI，不另建影子消息系统。",
           meta: "你看到的 transcript 来自 agents/*/sessions/*.jsonl。",
         },
-      ].forEach((item) => {
-        const card = el("div", "deliverable-card");
-        card.append(el("div", "deliverable-title", item.title));
-        card.append(el("div", "command-desc", item.body));
-        card.append(el("div", "path-line", item.meta));
-        refs.conversationSummaryList.append(card);
-      });
+      ]);
     }
 
     function renderConversationList() {
@@ -7178,6 +7858,30 @@ def safe_next_path(path):
     return path
 
 
+def resolve_frontend_dist(openclaw_dir, config=None, explicit_path=""):
+    explicit = str(explicit_path or "").strip()
+    if explicit:
+        candidate = Path(explicit).expanduser().resolve()
+        return candidate if candidate.exists() else None
+    project_dir = resolve_project_dir(openclaw_dir, config=config)
+    if not project_dir:
+        return None
+    candidate = (Path(project_dir) / "frontend" / "dist").resolve()
+    return candidate if candidate.exists() else None
+
+
+def parse_cors_origins(value):
+    raw = str(value or "").strip()
+    if not raw:
+        return set(DEFAULT_FRONTEND_ORIGINS)
+    return {item.strip() for item in raw.split(",") if item.strip()}
+
+
+def guess_content_type(path):
+    guessed, _encoding = mimetypes.guess_type(str(path))
+    return guessed or "application/octet-stream"
+
+
 def render_login_html(openclaw_dir, next_path="/", error_message=""):
     config = load_config(openclaw_dir)
     theme_name = config.get("sanshengLiubu", {}).get("theme", "imperial")
@@ -7247,23 +7951,116 @@ def actor_from_session(session):
 
 class CollaborationDashboardHandler(BaseHTTPRequestHandler):
     server_version = f"SanshengDashboard/{PRODUCT_VERSION}"
+    SPA_ROUTES = {
+        "/",
+        "/login",
+        "/overview",
+        "/agents",
+        "/tasks",
+        "/conversations",
+        "/activity",
+        "/themes",
+        "/skills",
+        "/openclaw",
+        "/admin",
+        "/collaboration-dashboard.html",
+    }
 
     def log_message(self, format, *args):
         return
+
+    def _cors_headers(self):
+        origin = (self.headers.get("Origin") or "").strip()
+        allowed = getattr(self.server, "cors_origins", set()) or set()
+        if not origin or origin not in allowed:
+            return []
+        return [
+            ("Access-Control-Allow-Origin", origin),
+            ("Access-Control-Allow-Credentials", "true"),
+            ("Vary", "Origin"),
+        ]
 
     def _send_bytes(self, body, content_type, status=200, extra_headers=None):
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store, no-cache, must-revalidate")
-        for key, value in extra_headers or []:
+        headers = list(self._cors_headers())
+        headers.extend(extra_headers or [])
+        for key, value in headers:
             self.send_header(key, value)
         self.end_headers()
-        self.wfile.write(body)
+        try:
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError, TimeoutError):
+            return
 
-    def _send_json(self, payload, status=200):
+    def _send_json(self, payload, status=200, extra_headers=None):
         body = (json.dumps(payload, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
-        self._send_bytes(body, "application/json; charset=utf-8", status=status)
+        self._send_bytes(body, "application/json; charset=utf-8", status=status, extra_headers=extra_headers)
+
+    def _send_preflight(self):
+        headers = self._cors_headers()
+        if not headers:
+            self._send_bytes(b"Origin not allowed", "text/plain; charset=utf-8", status=403)
+            return
+        self.send_response(204)
+        for key, value in headers:
+            self.send_header(key, value)
+        self.send_header("Access-Control-Allow-Methods", "GET,POST,OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.send_header("Access-Control-Max-Age", "600")
+        self.send_header("Cache-Control", "no-store, no-cache, must-revalidate")
+        self.end_headers()
+
+    def _auth_mode(self):
+        auth_token = getattr(self.server, "dashboard_auth_token", "")
+        if not auth_token:
+            return "open"
+        return "accounts" if load_product_users(self.server.openclaw_dir) else "token"
+
+    def _auth_payload(self):
+        session = self._session()
+        return {
+            "ok": bool(session),
+            "session": session_for_client(session),
+            "permissions": self._permissions(),
+            "authMode": self._auth_mode(),
+            "actionToken": expected_action_value(getattr(self.server, "dashboard_auth_token", "")) if session else "",
+            "productVersion": PRODUCT_VERSION,
+        }
+
+    def _frontend_dist(self):
+        return getattr(self.server, "frontend_dist", None)
+
+    def _serve_frontend_asset(self, path):
+        dist_dir = self._frontend_dist()
+        if not dist_dir:
+            return False
+        relative = path.lstrip("/")
+        if not relative:
+            return False
+        candidate = (dist_dir / relative).resolve()
+        if dist_dir not in candidate.parents or not candidate.is_file():
+            return False
+        self._send_bytes(candidate.read_bytes(), f"{guess_content_type(candidate)}; charset=utf-8" if candidate.suffix in {'.html', '.js', '.mjs', '.css', '.json', '.svg'} else guess_content_type(candidate))
+        return True
+
+    def _serve_frontend_index(self):
+        dist_dir = self._frontend_dist()
+        if not dist_dir:
+            return False
+        index_path = dist_dir / "index.html"
+        if not index_path.exists():
+            return False
+        self._send_bytes(index_path.read_bytes(), "text/html; charset=utf-8")
+        return True
+
+    def _serve_legacy_dashboard(self):
+        if not self._require_auth(api=False):
+            return
+        data, _paths = self._bundle()
+        self._send_bytes(render_html(data).encode("utf-8"), "text/html; charset=utf-8")
 
     def _runtime_data(self, data):
         config = load_config(self.server.openclaw_dir)
@@ -7404,7 +8201,109 @@ class CollaborationDashboardHandler(BaseHTTPRequestHandler):
             self._send_redirect(f"/login?next={quote(self._path())}")
         return False
 
+    def _build_session_data(self, kind, username, display_name, role):
+        return {
+            "kind": kind,
+            "username": username,
+            "displayName": display_name,
+            "role": role,
+            "issuedAt": now_iso(),
+            "expiresAt": (now_utc() + timedelta(hours=12)).isoformat().replace("+00:00", "Z"),
+        }
+
+    def _authenticate_password(self, username, password):
+        username = normalize_username(username)
+        password = str(password or "").strip()
+        user = find_product_user(self.server.openclaw_dir, username)
+        if user and user.get("status") == "active" and verify_password(password, user.get("passwordHash", "")):
+            session_data = self._build_session_data(
+                "user",
+                user["username"],
+                user.get("displayName") or user["username"],
+                user.get("role", "viewer"),
+            )
+            update_product_user_login(self.server.openclaw_dir, username)
+            append_audit_event(
+                self.server.openclaw_dir,
+                "login",
+                actor_from_session(session_data),
+                detail="团队账号登录成功。",
+                meta={"mode": "password"},
+            )
+            return session_data, None
+        append_audit_event(
+            self.server.openclaw_dir,
+            "login",
+            {"displayName": username or "unknown", "username": username, "role": "viewer", "kind": "anonymous"},
+            outcome="denied",
+            detail="团队账号登录失败。",
+            meta={"mode": "password"},
+        )
+        return None, "团队账号或密码不正确，请重新输入。"
+
+    def _authenticate_token(self, submitted):
+        auth_token = getattr(self.server, "dashboard_auth_token", "")
+        submitted = str(submitted or "").strip()
+        if auth_token and hmac.compare_digest(submitted, auth_token):
+            session_data = self._build_session_data("token", "owner-token", "Owner Token", "owner")
+            append_audit_event(
+                self.server.openclaw_dir,
+                "login",
+                actor_from_session(session_data),
+                detail="Owner Token 登录成功。",
+                meta={"mode": "token"},
+            )
+            return session_data, None
+        append_audit_event(
+            self.server.openclaw_dir,
+            "login",
+            {"displayName": "Owner Token", "username": "owner-token", "role": "owner", "kind": "anonymous"},
+            outcome="denied",
+            detail="Owner Token 登录失败。",
+            meta={"mode": "token"},
+        )
+        return None, "Owner Token 不正确，请重新输入。"
+
+    def _handle_auth_session_get(self):
+        payload = self._auth_payload()
+        payload["authenticated"] = payload["ok"]
+        self._send_json(payload)
+
+    def _handle_auth_login_json(self):
+        try:
+            payload = self._read_json_body()
+        except json.JSONDecodeError:
+            self._send_json({"ok": False, "error": "invalid_json", "message": "请求体不是合法 JSON。"}, status=400)
+            return
+        mode = str(payload.get("mode", "password") or "password").strip()
+        if mode == "password":
+            session_data, error_message = self._authenticate_password(payload.get("username", ""), payload.get("password", ""))
+        else:
+            session_data, error_message = self._authenticate_token(payload.get("token", ""))
+        if not session_data:
+            self._send_json({"ok": False, "error": "invalid_credentials", "message": error_message, "authMode": self._auth_mode()}, status=401)
+            return
+        self._cached_session = session_data
+        response = self._auth_payload()
+        response["ok"] = True
+        self._send_json(response, extra_headers=[self._login_cookie_header(session_data)])
+
+    def _handle_auth_logout_json(self):
+        session = self._session()
+        if session:
+            append_audit_event(
+                self.server.openclaw_dir,
+                "logout",
+                actor_from_session(session),
+                detail="用户已退出 Mission Control。",
+            )
+        self._cached_session = None
+        self._send_json({"ok": True}, extra_headers=[self._clear_cookie_header()])
+
     def _handle_login_get(self):
+        if self._frontend_dist():
+            self._serve_frontend_index()
+            return
         if self._is_authenticated():
             self._send_redirect(self._next_path())
             return
@@ -7417,77 +8316,27 @@ class CollaborationDashboardHandler(BaseHTTPRequestHandler):
         form = parse_qs(payload)
         mode = (form.get("mode", ["password"])[0] or "password").strip()
         next_path = safe_next_path((form.get("next", ["/"])[0] or "/"))
-        auth_token = getattr(self.server, "dashboard_auth_token", "")
         if mode == "password":
-            username = normalize_username(form.get("username", [""])[0])
-            password = (form.get("password", [""])[0] or "").strip()
-            user = find_product_user(self.server.openclaw_dir, username)
-            if user and user.get("status") == "active" and verify_password(password, user.get("passwordHash", "")):
-                session_data = {
-                    "kind": "user",
-                    "username": user["username"],
-                    "displayName": user.get("displayName") or user["username"],
-                    "role": user.get("role", "viewer"),
-                    "issuedAt": now_iso(),
-                    "expiresAt": (now_utc() + timedelta(hours=12)).isoformat().replace("+00:00", "Z"),
-                }
-                update_product_user_login(self.server.openclaw_dir, username)
-                append_audit_event(
-                    self.server.openclaw_dir,
-                    "login",
-                    actor_from_session(session_data),
-                    detail="团队账号登录成功。",
-                    meta={"mode": "password"},
-                )
+            session_data, error_message = self._authenticate_password(form.get("username", [""])[0], form.get("password", [""])[0])
+            if session_data:
                 self._send_redirect(next_path, extra_headers=[self._login_cookie_header(session_data)])
                 return
-            append_audit_event(
-                self.server.openclaw_dir,
-                "login",
-                {"displayName": username or "unknown", "username": username, "role": "viewer", "kind": "anonymous"},
-                outcome="denied",
-                detail="团队账号登录失败。",
-                meta={"mode": "password"},
-            )
             body = render_login_html(
                 self.server.openclaw_dir,
                 next_path=next_path,
-                error_message="团队账号或密码不正确，请重新输入。",
+                error_message=error_message,
             ).encode("utf-8")
             self._send_bytes(body, "text/html; charset=utf-8", status=401)
             return
 
-        submitted = (form.get("token", [""])[0] or "").strip()
-        if auth_token and hmac.compare_digest(submitted, auth_token):
-            session_data = {
-                "kind": "token",
-                "username": "owner-token",
-                "displayName": "Owner Token",
-                "role": "owner",
-                "issuedAt": now_iso(),
-                "expiresAt": (now_utc() + timedelta(hours=12)).isoformat().replace("+00:00", "Z"),
-            }
-            append_audit_event(
-                self.server.openclaw_dir,
-                "login",
-                actor_from_session(session_data),
-                detail="Owner Token 登录成功。",
-                meta={"mode": "token"},
-            )
+        session_data, error_message = self._authenticate_token(form.get("token", [""])[0])
+        if session_data:
             self._send_redirect(next_path, extra_headers=[self._login_cookie_header(session_data)])
             return
-        append_audit_event(
-            self.server.openclaw_dir,
-            "login",
-            {"displayName": "Owner Token", "username": "owner-token", "role": "owner", "kind": "anonymous"},
-            outcome="denied",
-            detail="Owner Token 登录失败。",
-            meta={"mode": "token"},
-        )
         body = render_login_html(
             self.server.openclaw_dir,
             next_path=next_path,
-            error_message="Owner Token 不正确，请重新输入。",
+            error_message=error_message,
         ).encode("utf-8")
         self._send_bytes(body, "text/html; charset=utf-8", status=401)
 
@@ -7503,6 +8352,7 @@ class CollaborationDashboardHandler(BaseHTTPRequestHandler):
             actor_from_session(session),
             detail="用户已退出 Mission Control。",
         )
+        self._cached_session = None
         self._send_redirect(next_path, extra_headers=[self._clear_cookie_header()])
 
     def _handle_action_post(self, path):
@@ -7852,12 +8702,30 @@ class CollaborationDashboardHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         path = self._path()
+        if self._serve_frontend_asset(path):
+            return
+        if path == "/legacy-login":
+            if self._is_authenticated():
+                self._send_redirect("/")
+                return
+            body = render_login_html(self.server.openclaw_dir, next_path=self._next_path()).encode("utf-8")
+            self._send_bytes(body, "text/html; charset=utf-8")
+            return
+        if path == "/legacy":
+            self._serve_legacy_dashboard()
+            return
         if path == "/login":
             self._handle_login_get()
             return
+        if path == "/api/auth/session":
+            self._handle_auth_session_get()
+            return
+        if self._frontend_dist() and path in self.SPA_ROUTES:
+            self._serve_frontend_index()
+            return
         if not self._require_auth(api=path.startswith("/api/") or path == "/events"):
             return
-        if path in ("/", "/overview", "/agents", "/tasks", "/conversations", "/activity", "/themes", "/skills", "/openclaw", "/admin", "/collaboration-dashboard.html"):
+        if path in self.SPA_ROUTES:
             data, _paths = self._bundle()
             self._send_bytes(render_html(data).encode("utf-8"), "text/html; charset=utf-8")
             return
@@ -7933,6 +8801,12 @@ class CollaborationDashboardHandler(BaseHTTPRequestHandler):
         if path == "/login":
             self._handle_login_post()
             return
+        if path == "/api/auth/login":
+            self._handle_auth_login_json()
+            return
+        if path == "/api/auth/logout":
+            self._handle_auth_logout_json()
+            return
         if path == "/logout":
             self._handle_logout_post()
             return
@@ -7940,6 +8814,13 @@ class CollaborationDashboardHandler(BaseHTTPRequestHandler):
             return
         if path.startswith("/api/actions/"):
             self._handle_action_post(path)
+            return
+        self._send_bytes(b"Method not allowed", "text/plain; charset=utf-8", status=405)
+
+    def do_OPTIONS(self):
+        path = self._path()
+        if path.startswith("/api/") or path == "/events":
+            self._send_preflight()
             return
         self._send_bytes(b"Method not allowed", "text/plain; charset=utf-8", status=405)
 
@@ -7951,6 +8832,8 @@ class CollaborationDashboardHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "text/event-stream; charset=utf-8")
         self.send_header("Cache-Control", "no-store, no-cache, must-revalidate")
         self.send_header("Connection", "keep-alive")
+        for key, value in self._cors_headers():
+            self.send_header(key, value)
         self.end_headers()
 
         last_signature = None
@@ -7975,14 +8858,21 @@ class CollaborationDashboardHandler(BaseHTTPRequestHandler):
             return
 
 
-def serve_dashboard(openclaw_dir, output_dir, port, live_interval):
+def serve_dashboard(openclaw_dir, output_dir, port, live_interval, frontend_dist="", cors_origins=""):
     server = ThreadingHTTPServer(("127.0.0.1", port), CollaborationDashboardHandler)
     server.openclaw_dir = Path(openclaw_dir)
     server.output_dir = Path(output_dir) if output_dir else Path(openclaw_dir) / "dashboard"
     server.live_interval = live_interval
     server.dashboard_auth_token = resolve_dashboard_auth_token(server.openclaw_dir)
+    server.frontend_dist = resolve_frontend_dist(server.openclaw_dir, explicit_path=frontend_dist)
+    server.cors_origins = parse_cors_origins(cors_origins)
     build_dashboard_bundle(server.openclaw_dir, server.output_dir)
-    print(f"Serving collaboration dashboard at http://127.0.0.1:{port}/collaboration-dashboard.html")
+    if server.frontend_dist:
+        print(f"Serving mission control API at http://127.0.0.1:{port}/api/dashboard")
+        print(f"Serving separated frontend at http://127.0.0.1:{port}/")
+        print(f"Legacy monolith remains available at http://127.0.0.1:{port}/legacy")
+    else:
+        print(f"Serving collaboration dashboard at http://127.0.0.1:{port}/collaboration-dashboard.html")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
@@ -7998,6 +8888,8 @@ def main():
     parser.add_argument("--serve", action="store_true")
     parser.add_argument("--port", type=int, default=18890)
     parser.add_argument("--live-interval", type=float, default=2.0)
+    parser.add_argument("--frontend-dist", default="")
+    parser.add_argument("--cors-origins", default=",".join(sorted(DEFAULT_FRONTEND_ORIGINS)))
     parser.add_argument("--quiet", action="store_true")
     args = parser.parse_args()
 
@@ -8007,7 +8899,14 @@ def main():
         print(f"Generated dashboard HTML: {paths['html']}")
         print(f"Generated dashboard JSON: {paths['json']}")
     if args.serve:
-        serve_dashboard(openclaw_dir, args.output_dir or None, args.port, args.live_interval)
+        serve_dashboard(
+            openclaw_dir,
+            args.output_dir or None,
+            args.port,
+            args.live_interval,
+            frontend_dist=args.frontend_dist,
+            cors_origins=args.cors_origins,
+        )
 
 
 if __name__ == "__main__":

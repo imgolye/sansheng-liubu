@@ -6,7 +6,7 @@ set -euo pipefail
 #  用法: bash setup.sh [--theme imperial|corporate|startup]
 # ============================================================
 
-VERSION="1.15.0"
+VERSION="1.16.0"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 TEMPLATES_DIR="$PROJECT_DIR/templates"
@@ -235,6 +235,14 @@ info "看板数据已初始化"
 python3 "$OPENCLAW_DIR/workspace-${ALL_AGENTS[0]}/scripts/collaboration_dashboard.py" --quiet || true
 info "协同态势看板已生成"
 
+if [[ -f "$PROJECT_DIR/bin/build_frontend.sh" ]]; then
+  if bash "$PROJECT_DIR/bin/build_frontend.sh" --project-dir "$PROJECT_DIR"; then
+    info "前后端分离前端已检查/构建完成"
+  else
+    warn "前端构建未完成，当前仍可通过 /legacy 使用旧版单文件控制台"
+  fi
+fi
+
 # ---------- 权限加固 ----------
 chmod 600 "$OPENCLAW_DIR/openclaw.json"
 info "文件权限已加固"
@@ -250,5 +258,6 @@ echo "下一步:"
 echo "  1. 启动网关:  openclaw gateway run"
 echo "  2. 健康检查:  openclaw gateway health"
 echo "  3. 安全审计:  openclaw security audit"
+echo "  4. Product UI: http://127.0.0.1:18890/  (旧版入口: /legacy)"
 echo ""
 echo "发送消息给机器人即可开始使用！"

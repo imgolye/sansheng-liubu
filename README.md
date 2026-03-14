@@ -4,6 +4,20 @@
 
 一键部署 11 个协作 AI Agent，模拟组织架构处理复杂任务。
 
+## 1.2.0 亮点
+
+现在支持在已安装环境里直接切换主题，无需重装：
+
+```bash
+bash bin/switch_theme.sh --theme startup
+```
+
+切换时会自动：
+- 备份当前配置
+- 保留现有频道、模型和网关 token
+- 迁移任务看板、会话目录和 workspace 产物
+- 重生成新主题的 `SOUL.md` 与 `openclaw.json`
+
 ## 架构
 
 ```

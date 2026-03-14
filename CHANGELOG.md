@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.7.0 - 2026-03-14
+
+### Added
+- Added a local login flow at `/login` with cookie-based session access for Mission Control routes, APIs, and live events.
+- Added layout controls for collapsing the left menu and switching between operations, focus, and compact product layouts with persisted preferences.
+
+### Changed
+- Turned the Mission Control shell into a protected local product surface with navigation, authenticated app routes, and signed local session state.
+- Expanded the top navigation to include menu controls, layout switching, and authenticated sign-out actions.
+
+### Fixed
+- Ensured unauthenticated requests to product APIs and SSE streams now return proper auth gating instead of exposing data directly.
+- Preserved layout choices across reloads so the product opens in the same working mode the user last selected.
+
 ## 1.6.0 - 2026-03-14
 
 ### Added

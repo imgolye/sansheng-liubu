@@ -4,7 +4,7 @@
 
 一键部署 11 个协作 AI Agent，模拟组织架构处理复杂任务。
 
-## 1.6.0 亮点
+## 1.7.0 亮点
 
 现在不只是一个“实时大屏”，而是一套本地可用的多 Agent 产品：
 
@@ -15,8 +15,10 @@ python3 ~/.openclaw/workspace-your-router-id/scripts/collaboration_dashboard.py 
 这一版新增：
 - 多模块 Mission Control：总览、Agent 运营、交付执行、活动时间线、主题中心
 - 本地实时 Web 应用：`--serve` 会启动带 SSE 推送的常驻产品面板
+- 本地登录：先访问 `/login`，通过 cookie 会话进入受保护的产品界面
 - 深链接路由：`/agents`、`/tasks`、`/activity`、`/themes`
 - 本地 API：`/api/agents`、`/api/tasks`、`/api/events`、`/api/themes`、`/api/deliverables`
+- 可调布局：支持收起菜单，并在运营 / 聚焦 / 紧凑三种布局间切换
 - 全局搜索、任务筛选、交付物列表、产品内置 runbook
 - Agent 明细抽屉与任务回放抽屉仍然保留
 - 运行中切换主题：`bash bin/switch_theme.sh --theme startup`
@@ -149,6 +151,14 @@ http://127.0.0.1:18890/collaboration-dashboard.html
 ```
 
 它会通过 Server-Sent Events 实时接收任务与协同变化，不再整页重载。
+
+如果开启本地服务，建议先从登录页进入：
+
+```text
+http://127.0.0.1:18890/login
+```
+
+登录默认使用 `DASHBOARD_AUTH_TOKEN`；如果未设置，会自动回落到现有的 `GATEWAY_AUTH_TOKEN`。
 
 如果通过本地服务访问，现在还可以直接打开这些模块：
 

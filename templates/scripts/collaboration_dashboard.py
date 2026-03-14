@@ -5,13 +5,16 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import hmac
 import json
 import os
 import time
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
+from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import parse_qs, quote, urlsplit
 
 
 TERMINAL_STATES = {"done", "cancelled", "canceled"}
@@ -80,6 +83,285 @@ THEME_CATALOG = {
         "summary": "减少流程负担，让 PM、全栈、测试、运营等角色快速接力推进。",
     },
 }
+
+SESSION_COOKIE_NAME = "sansheng_dashboard_session"
+SESSION_COOKIE_MAX_AGE = 60 * 60 * 12
+
+LOGIN_TEMPLATE = """<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mission Control Login</title>
+  <link rel="icon" href="data:,">
+  <style>
+    :root {{
+      --bg: {bg};
+      --bg2: {bg2};
+      --ink: {ink};
+      --muted: {muted};
+      --accent: {accent};
+      --accentStrong: {accentStrong};
+      --accentSoft: {accentSoft};
+      --line: {line};
+      --ok: {ok};
+      --danger: {danger};
+    }}
+    * {{ box-sizing: border-box; }}
+    html, body {{ margin: 0; min-height: 100%; }}
+    body {{
+      font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 0% 0%, rgba(255,255,255,0.72), transparent 30%),
+        radial-gradient(circle at 100% 0%, rgba(255,255,255,0.38), transparent 26%),
+        linear-gradient(150deg, var(--bg), var(--bg2));
+      padding: 18px;
+    }}
+    .login-shell {{
+      width: min(1180px, 100%);
+      min-height: calc(100vh - 36px);
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: 1.08fr 0.92fr;
+      gap: 18px;
+      align-items: stretch;
+    }}
+    .story,
+    .auth-card {{
+      border-radius: 30px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,0.72);
+      box-shadow: 0 24px 60px rgba(57, 40, 28, 0.10);
+      overflow: hidden;
+    }}
+    .story {{
+      position: relative;
+      padding: 34px;
+      background:
+        linear-gradient(140deg, rgba(255,255,255,0.78), rgba(255,255,255,0.58)),
+        radial-gradient(circle at 100% 0%, color-mix(in srgb, var(--accentSoft) 70%, white 30%), transparent 42%);
+    }}
+    .story::after {{
+      content: "";
+      position: absolute;
+      right: -80px;
+      bottom: -110px;
+      width: 280px;
+      height: 280px;
+      border-radius: 50%;
+      background: radial-gradient(circle, color-mix(in srgb, var(--accentSoft) 76%, white 24%), transparent 64%);
+      opacity: 0.85;
+      pointer-events: none;
+    }}
+    .eyebrow {{
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      color: var(--accentStrong);
+      font-size: 12px;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      font-weight: 700;
+    }}
+    .eyebrow::before {{
+      content: "";
+      width: 38px;
+      height: 1px;
+      background: currentColor;
+      opacity: 0.7;
+    }}
+    h1 {{
+      margin: 18px 0 14px;
+      font-family: "Fraunces", "Times New Roman", serif;
+      font-size: clamp(2.8rem, 5vw, 5rem);
+      line-height: 0.92;
+      max-width: 10ch;
+    }}
+    .lede {{
+      max-width: 56ch;
+      color: var(--muted);
+      line-height: 1.78;
+      font-size: 1.04rem;
+      margin: 0;
+    }}
+    .story-grid {{
+      margin-top: 24px;
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+    }}
+    .story-card {{
+      border-radius: 20px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,0.64);
+      padding: 16px;
+    }}
+    .story-card span {{
+      display: block;
+      color: var(--muted);
+      font-size: 0.82rem;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      font-weight: 700;
+    }}
+    .story-card strong {{
+      display: block;
+      margin-top: 8px;
+      font-size: 1.18rem;
+      line-height: 1.4;
+    }}
+    .story-card p {{
+      margin: 8px 0 0;
+      color: var(--muted);
+      line-height: 1.65;
+      font-size: 0.94rem;
+    }}
+    .auth-card {{
+      padding: 24px;
+      display: grid;
+      align-content: center;
+      gap: 18px;
+    }}
+    .auth-top {{
+      display: grid;
+      gap: 8px;
+    }}
+    .auth-top h2 {{
+      margin: 0;
+      font-family: "Fraunces", "Times New Roman", serif;
+      font-size: 2.3rem;
+      line-height: 0.96;
+    }}
+    .auth-top p,
+    .auth-help,
+    .auth-meta {{
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.7;
+    }}
+    form {{
+      display: grid;
+      gap: 14px;
+    }}
+    label {{
+      display: grid;
+      gap: 8px;
+      font-size: 0.96rem;
+      font-weight: 700;
+    }}
+    input[type="password"] {{
+      width: 100%;
+      border-radius: 18px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,0.88);
+      color: var(--ink);
+      padding: 14px 16px;
+      outline: none;
+      font: inherit;
+    }}
+    input[type="password"]:focus {{
+      border-color: color-mix(in srgb, var(--accent) 38%, var(--line));
+      box-shadow: 0 0 0 4px rgba(203, 90, 30, 0.10);
+    }}
+    .button {{
+      appearance: none;
+      border: 0;
+      border-radius: 999px;
+      padding: 13px 18px;
+      background: var(--accent);
+      color: #fffaf3;
+      font-weight: 700;
+      cursor: pointer;
+      text-decoration: none;
+      box-shadow: 0 14px 30px rgba(130, 73, 24, 0.18);
+    }}
+    .button.secondary {{
+      background: rgba(255,255,255,0.82);
+      color: var(--ink);
+      box-shadow: none;
+      border: 1px solid var(--line);
+    }}
+    .auth-actions {{
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+    }}
+    .error {{
+      border-radius: 16px;
+      border: 1px solid color-mix(in srgb, var(--danger) 28%, var(--line));
+      background: rgba(255,255,255,0.78);
+      color: var(--danger);
+      padding: 12px 14px;
+      line-height: 1.6;
+      font-size: 0.95rem;
+    }}
+    .hidden {{ display: none; }}
+    @media (max-width: 980px) {{
+      .login-shell {{ grid-template-columns: 1fr; }}
+      .story-grid {{ grid-template-columns: 1fr; }}
+    }}
+  </style>
+</head>
+<body>
+  <div class="login-shell">
+    <section class="story">
+      <div class="eyebrow">Mission Control</div>
+      <h1>先登录，再进入你的多 Agent 产品控制台。</h1>
+      <p class="lede">这不是公开页面，而是本地协同中枢。登录后你会进入完整的 Mission Control 应用，查看 Agent 运营、任务交付、活动时间线、主题中心和交付资产。</p>
+      <div class="story-grid">
+        <article class="story-card">
+          <span>Product Surface</span>
+          <strong>总览、Agents、Tasks、Activity、Themes</strong>
+          <p>不再只是一个大屏，而是多模块本地产品。</p>
+        </article>
+        <article class="story-card">
+          <span>Secure Local Access</span>
+          <strong>使用本地控制令牌进入</strong>
+          <p>默认使用 `DASHBOARD_AUTH_TOKEN`，未设置时回落到 `GATEWAY_AUTH_TOKEN`。</p>
+        </article>
+        <article class="story-card">
+          <span>Live Control</span>
+          <strong>实时事件流 + 本地 API</strong>
+          <p>登录后可访问 `/api/agents`、`/api/tasks`、`/events` 等接口。</p>
+        </article>
+        <article class="story-card">
+          <span>Current Context</span>
+          <strong>{theme_name} · {owner_title}</strong>
+          <p>{theme_summary}</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="auth-card">
+      <div class="auth-top">
+        <div class="eyebrow">Local Sign-In</div>
+        <h2>进入 Mission Control</h2>
+        <p>输入本地控制令牌后，即可进入受保护的产品界面。</p>
+      </div>
+
+      <div class="error {error_hidden}">{error_message}</div>
+
+      <form method="post" action="/login">
+        <input type="hidden" name="next" value="{next_path}">
+        <label>
+          控制令牌
+          <input type="password" name="token" autocomplete="current-password" placeholder="输入本地 dashboard token">
+        </label>
+        <div class="auth-actions">
+          <button class="button" type="submit">登录进入</button>
+          <a class="button secondary" href="https://github.com/imgolye/sansheng-liubu/releases/latest">查看版本说明</a>
+        </div>
+      </form>
+
+      <p class="auth-help">如果你希望单独管理登录令牌，可在 `{openclaw_dir}/.env` 中设置 `DASHBOARD_AUTH_TOKEN`。否则会默认使用现有 `GATEWAY_AUTH_TOKEN`。</p>
+      <p class="auth-meta">登录后会创建本地会话 cookie，仅用于当前 Mission Control 页面与 API 访问。</p>
+    </section>
+  </div>
+</body>
+</html>
+"""
 
 
 HTML_TEMPLATE = """<!doctype html>
@@ -966,6 +1248,69 @@ __STYLE_VARS__
       gap: 10px;
       align-items: center;
     }
+    .layout-row,
+    .auth-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+    }
+    .auth-row form {
+      display: inline-flex;
+      gap: 0;
+    }
+    .button.small {
+      padding: 10px 14px;
+      font-size: 0.92rem;
+    }
+    .app-shell[data-rail="collapsed"] {
+      grid-template-columns: 108px minmax(0, 1fr);
+    }
+    .app-shell[data-rail="collapsed"] .rail-copy,
+    .app-shell[data-rail="collapsed"] .rail-label,
+    .app-shell[data-rail="collapsed"] .rail-grid,
+    .app-shell[data-rail="collapsed"] .command-list,
+    .app-shell[data-rail="collapsed"] .nav-link span,
+    .app-shell[data-rail="collapsed"] .brand-card h2 {
+      display: none;
+    }
+    .app-shell[data-rail="collapsed"] .brand-card,
+    .app-shell[data-rail="collapsed"] .rail-panel {
+      padding: 14px 12px;
+    }
+    .app-shell[data-rail="collapsed"] .eyebrow::before {
+      width: 16px;
+    }
+    .app-shell[data-rail="collapsed"] .nav-link {
+      text-align: center;
+      padding: 14px 10px;
+    }
+    .app-shell[data-layout="focus"] .overview-grid {
+      grid-template-columns: 1fr;
+    }
+    .app-shell[data-layout="focus"] .split-grid {
+      grid-template-columns: 1fr;
+    }
+    .app-shell[data-layout="focus"] .status-strip {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+    .app-shell[data-layout="compact"] .metric-grid,
+    .app-shell[data-layout="compact"] .status-strip {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+    .app-shell[data-layout="compact"] .agent-grid,
+    .app-shell[data-layout="compact"] .task-list,
+    .app-shell[data-layout="compact"] .event-feed {
+      gap: 10px;
+    }
+    .app-shell[data-layout="compact"] .agent-card,
+    .app-shell[data-layout="compact"] .task-card,
+    .app-shell[data-layout="compact"] .status-card,
+    .app-shell[data-layout="compact"] .deliverable-card,
+    .app-shell[data-layout="compact"] .command-card {
+      padding: 14px;
+      border-radius: 18px;
+    }
     @keyframes pulse {
       0% { box-shadow: 0 0 0 0 color-mix(in srgb, currentColor 28%, transparent); }
       70% { box-shadow: 0 0 0 12px color-mix(in srgb, currentColor 0%, transparent); }
@@ -984,6 +1329,7 @@ __STYLE_VARS__
     @media (max-width: 760px) {
       .shell { width: min(100vw - 18px, 1480px); margin: 10px auto 26px; }
       .app-shell { width: min(100vw - 14px, 1720px); margin: 8px auto 22px; }
+      .app-shell[data-rail="collapsed"] { grid-template-columns: 1fr; }
       .hero { padding: 22px 18px 20px; border-radius: 24px; }
       .metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .relay-grid { grid-template-columns: 1fr; }
@@ -1008,7 +1354,7 @@ __STYLE_VARS__
   </style>
 </head>
 <body>
-  <div class="app-shell">
+  <div class="app-shell" id="app-shell" data-layout="operations" data-rail="expanded">
     <aside class="rail">
       <section class="brand-card">
         <div class="eyebrow">Sansheng Liubu</div>
@@ -1054,6 +1400,19 @@ __STYLE_VARS__
           <input class="search-input" id="global-search" type="search" placeholder="搜索 Agent、任务、事件、交付物">
         </div>
         <div class="topbar-tools">
+          <button class="button secondary small" id="toggle-rail">菜单</button>
+          <div class="layout-row" id="layout-row">
+            <button class="filter-chip" data-layout="operations" type="button">运营</button>
+            <button class="filter-chip" data-layout="focus" type="button">聚焦</button>
+            <button class="filter-chip" data-layout="compact" type="button">紧凑</button>
+          </div>
+          <div class="auth-row" id="auth-row">
+            <span class="theme-badge" id="auth-status">已登录</span>
+            <form method="post" action="/logout" id="logout-form">
+              <input type="hidden" name="next" value="/login">
+              <button class="button secondary small" type="submit">退出</button>
+            </form>
+          </div>
           <button class="button" id="refresh-now">立即刷新</button>
           <button class="button secondary" id="toggle-refresh">暂停实时刷新</button>
           <a class="button secondary" id="json-link" href="./collaboration-dashboard.json">查看 JSON 快照</a>
@@ -1270,11 +1629,17 @@ __STYLE_VARS__
     };
 
     const refs = {
+      appShell: document.getElementById("app-shell"),
       navLinks: Array.from(document.querySelectorAll(".nav-link")),
       views: Array.from(document.querySelectorAll(".view")),
       viewTitle: document.getElementById("view-title"),
       viewSubtitle: document.getElementById("view-subtitle"),
       globalSearch: document.getElementById("global-search"),
+      toggleRail: document.getElementById("toggle-rail"),
+      layoutButtons: Array.from(document.querySelectorAll("[data-layout]")).filter((node) => node.closest("#layout-row")),
+      authRow: document.getElementById("auth-row"),
+      authStatus: document.getElementById("auth-status"),
+      logoutForm: document.getElementById("logout-form"),
       metricGrid: document.getElementById("metric-grid"),
       overviewRelayGrid: document.getElementById("overview-relay-grid"),
       overviewAgentGrid: document.getElementById("overview-agent-grid"),
@@ -1322,6 +1687,8 @@ __STYLE_VARS__
     let currentView = getViewFromLocation();
     let searchQuery = "";
     let taskFilter = "active";
+    let layoutMode = localStorage.getItem("sansheng-layout-mode") || "operations";
+    let railCollapsed = localStorage.getItem("sansheng-rail-collapsed") === "true";
 
     function el(tag, className, text) {
       const node = document.createElement(tag);
@@ -1391,6 +1758,32 @@ __STYLE_VARS__
       }
       renderAll();
       window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+
+    function applyLayoutPrefs() {
+      refs.appShell.dataset.layout = layoutMode;
+      refs.appShell.dataset.rail = railCollapsed ? "collapsed" : "expanded";
+      refs.layoutButtons.forEach((button) => {
+        button.dataset.active = String(button.dataset.layout === layoutMode);
+      });
+      refs.toggleRail.textContent = railCollapsed ? "展开菜单" : "收起菜单";
+      if (!supportsHttp) {
+        refs.authRow.hidden = true;
+      } else {
+        refs.authRow.hidden = false;
+      }
+    }
+
+    function setLayoutMode(mode) {
+      layoutMode = mode;
+      localStorage.setItem("sansheng-layout-mode", layoutMode);
+      applyLayoutPrefs();
+    }
+
+    function toggleRail() {
+      railCollapsed = !railCollapsed;
+      localStorage.setItem("sansheng-rail-collapsed", String(railCollapsed));
+      applyLayoutPrefs();
     }
 
     function normalizeText(value) {
@@ -1831,6 +2224,7 @@ __STYLE_VARS__
       refs.railRouterAgent.textContent = state.routerAgentId || "未知";
       refs.railInstallDir.textContent = state.openclawDir;
       refs.jsonLink.href = dashboardJsonHref();
+      refs.authStatus.textContent = supportsHttp ? "本地会话" : "快照模式";
       renderCommandCards(refs.railCommandList, (state.commands || []).slice(0, 2), "暂无快速动作。");
     }
 
@@ -2153,6 +2547,10 @@ __STYLE_VARS__
     refs.navLinks.forEach((link) => {
       link.addEventListener("click", () => navigate(link.dataset.view));
     });
+    refs.layoutButtons.forEach((button) => {
+      button.addEventListener("click", () => setLayoutMode(button.dataset.layout));
+    });
+    refs.toggleRail.addEventListener("click", toggleRail);
     refs.globalSearch.addEventListener("input", (event) => {
       searchQuery = event.target.value.trim();
       renderAll();
@@ -2212,6 +2610,7 @@ __STYLE_VARS__
       }
     }, 1000);
 
+    applyLayoutPrefs();
     renderAll();
     if (supportsHttp) {
       connectLive();
@@ -2851,25 +3250,184 @@ def build_dashboard_bundle(openclaw_dir, output_dir=None):
     return data, paths
 
 
+def read_env_value(openclaw_dir, key):
+    env_path = Path(openclaw_dir) / ".env"
+    if not env_path.exists():
+        return ""
+    for line in env_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        current_key, value = line.split("=", 1)
+        if current_key == key:
+            return value.strip()
+    return ""
+
+
+def resolve_dashboard_auth_token(openclaw_dir):
+    for key in ("DASHBOARD_AUTH_TOKEN", "GATEWAY_AUTH_TOKEN"):
+        value = os.environ.get(key) or read_env_value(openclaw_dir, key)
+        if value:
+            return value
+    return ""
+
+
+def expected_session_value(auth_token):
+    return hmac.new(auth_token.encode("utf-8"), b"sansheng-liubu-dashboard", hashlib.sha256).hexdigest()
+
+
+def parse_request_cookies(cookie_header):
+    cookie = SimpleCookie()
+    if cookie_header:
+        cookie.load(cookie_header)
+    return {name: morsel.value for name, morsel in cookie.items()}
+
+
+def safe_next_path(path):
+    if not path or not path.startswith("/"):
+        return "/"
+    if path.startswith("//") or path.startswith("/login"):
+        return "/"
+    return path
+
+
+def render_login_html(openclaw_dir, next_path="/", error_message=""):
+    config = load_config(openclaw_dir)
+    theme_name = config.get("sanshengLiubu", {}).get("theme", "imperial")
+    theme_style = THEME_STYLES.get(theme_name, THEME_STYLES["imperial"])
+    theme_meta = THEME_CATALOG.get(theme_name, THEME_CATALOG["imperial"])
+    router_agent_id = get_router_agent_id(config)
+    kanban_cfg = load_kanban_config(openclaw_dir, router_agent_id)
+    return LOGIN_TEMPLATE.format(
+        bg=theme_style["bg"],
+        bg2=theme_style["bg2"],
+        ink=theme_style["ink"],
+        muted=theme_style["muted"],
+        accent=theme_style["accent"],
+        accentStrong=theme_style["accentStrong"],
+        accentSoft=theme_style["accentSoft"],
+        line=theme_style["line"],
+        ok=theme_style["ok"],
+        danger=theme_style["danger"],
+        theme_name=theme_meta["displayName"],
+        owner_title=kanban_cfg.get("owner_title", "Mission Control"),
+        theme_summary=theme_meta["summary"],
+        next_path=safe_next_path(next_path),
+        openclaw_dir=openclaw_dir,
+        error_message=error_message or "",
+        error_hidden="hidden" if not error_message else "",
+    )
+
+
 class CollaborationDashboardHandler(BaseHTTPRequestHandler):
-    server_version = "SanshengDashboard/1.6"
+    server_version = "SanshengDashboard/1.7"
 
     def log_message(self, format, *args):
         return
 
-    def _send_bytes(self, body, content_type, status=200):
+    def _send_bytes(self, body, content_type, status=200, extra_headers=None):
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store, no-cache, must-revalidate")
+        for key, value in extra_headers or []:
+            self.send_header(key, value)
         self.end_headers()
         self.wfile.write(body)
 
     def _bundle(self):
         return build_dashboard_bundle(self.server.openclaw_dir, self.server.output_dir)
 
+    def _path(self):
+        return urlsplit(self.path).path
+
+    def _query(self):
+        return parse_qs(urlsplit(self.path).query)
+
+    def _next_path(self):
+        return safe_next_path(self._query().get("next", ["/"])[0])
+
+    def _is_authenticated(self):
+        auth_token = getattr(self.server, "dashboard_auth_token", "")
+        if not auth_token:
+            return True
+        cookies = parse_request_cookies(self.headers.get("Cookie", ""))
+        current = cookies.get(SESSION_COOKIE_NAME, "")
+        return bool(current) and hmac.compare_digest(current, expected_session_value(auth_token))
+
+    def _login_cookie_header(self):
+        auth_token = getattr(self.server, "dashboard_auth_token", "")
+        return (
+            "Set-Cookie",
+            f"{SESSION_COOKIE_NAME}={expected_session_value(auth_token)}; Max-Age={SESSION_COOKIE_MAX_AGE}; Path=/; HttpOnly; SameSite=Lax",
+        )
+
+    def _clear_cookie_header(self):
+        return (
+            "Set-Cookie",
+            f"{SESSION_COOKIE_NAME}=; Max-Age=0; Path=/; HttpOnly; SameSite=Lax",
+        )
+
+    def _send_redirect(self, location, extra_headers=None):
+        headers = [("Location", location)]
+        headers.extend(extra_headers or [])
+        self.send_response(302)
+        for key, value in headers:
+            self.send_header(key, value)
+        self.send_header("Cache-Control", "no-store, no-cache, must-revalidate")
+        self.end_headers()
+
+    def _require_auth(self, api=False):
+        if self._is_authenticated():
+            return True
+        if api:
+            body = json.dumps(
+                {"error": "auth_required", "login": f"/login?next={quote(self._path())}"},
+                ensure_ascii=False,
+            ).encode("utf-8")
+            self._send_bytes(body, "application/json; charset=utf-8", status=401)
+        else:
+            self._send_redirect(f"/login?next={quote(self._path())}")
+        return False
+
+    def _handle_login_get(self):
+        if self._is_authenticated():
+            self._send_redirect(self._next_path())
+            return
+        body = render_login_html(self.server.openclaw_dir, next_path=self._next_path()).encode("utf-8")
+        self._send_bytes(body, "text/html; charset=utf-8")
+
+    def _handle_login_post(self):
+        length = int(self.headers.get("Content-Length", "0") or "0")
+        payload = self.rfile.read(length).decode("utf-8", "replace")
+        form = parse_qs(payload)
+        submitted = (form.get("token", [""])[0] or "").strip()
+        next_path = safe_next_path((form.get("next", ["/"])[0] or "/"))
+        auth_token = getattr(self.server, "dashboard_auth_token", "")
+        if auth_token and hmac.compare_digest(submitted, auth_token):
+            self._send_redirect(next_path, extra_headers=[self._login_cookie_header()])
+            return
+        body = render_login_html(
+            self.server.openclaw_dir,
+            next_path=next_path,
+            error_message="控制令牌不正确，请重新输入。",
+        ).encode("utf-8")
+        self._send_bytes(body, "text/html; charset=utf-8", status=401)
+
+    def _handle_logout_post(self):
+        length = int(self.headers.get("Content-Length", "0") or "0")
+        payload = self.rfile.read(length).decode("utf-8", "replace") if length else ""
+        form = parse_qs(payload)
+        next_path = safe_next_path((form.get("next", ["/login"])[0] or "/login"))
+        self._send_redirect(next_path, extra_headers=[self._clear_cookie_header()])
+
     def do_GET(self):
-        path = self.path.split("?", 1)[0]
+        path = self._path()
+        if path == "/login":
+            self._handle_login_get()
+            return
+        if not self._require_auth(api=path.startswith("/api/") or path == "/events"):
+            return
         if path in ("/", "/overview", "/agents", "/tasks", "/activity", "/themes", "/collaboration-dashboard.html"):
             data, _paths = self._bundle()
             self._send_bytes(render_html(data).encode("utf-8"), "text/html; charset=utf-8")
@@ -2909,7 +3467,22 @@ class CollaborationDashboardHandler(BaseHTTPRequestHandler):
             return
         self._send_bytes(b"Not found", "text/plain; charset=utf-8", status=404)
 
+    def do_POST(self):
+        path = self._path()
+        if path == "/login":
+            self._handle_login_post()
+            return
+        if path == "/logout":
+            self._handle_logout_post()
+            return
+        if not self._require_auth(api=path.startswith("/api/") or path == "/events"):
+            return
+        self._send_bytes(b"Method not allowed", "text/plain; charset=utf-8", status=405)
+
     def _serve_events(self):
+        if not self._is_authenticated():
+            self._send_bytes(b"auth required", "text/plain; charset=utf-8", status=401)
+            return
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream; charset=utf-8")
         self.send_header("Cache-Control", "no-store, no-cache, must-revalidate")
@@ -2943,6 +3516,7 @@ def serve_dashboard(openclaw_dir, output_dir, port, live_interval):
     server.openclaw_dir = Path(openclaw_dir)
     server.output_dir = Path(output_dir) if output_dir else Path(openclaw_dir) / "dashboard"
     server.live_interval = live_interval
+    server.dashboard_auth_token = resolve_dashboard_auth_token(server.openclaw_dir)
     build_dashboard_bundle(server.openclaw_dir, server.output_dir)
     print(f"Serving collaboration dashboard at http://127.0.0.1:{port}/collaboration-dashboard.html")
     try:

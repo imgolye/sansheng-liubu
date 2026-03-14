@@ -7,21 +7,73 @@ class ApiError extends Error {
   }
 }
 
-async function request(path, options = {}) {
-  const response = await fetch(path, {
-    credentials: "include",
-    ...options,
-    headers: {
-      ...(options.body ? { "Content-Type": "application/json" } : {}),
-      ...(options.headers || {}),
-    },
-  });
-  const text = await response.text();
-  const payload = text ? JSON.parse(text) : {};
-  if (!response.ok) {
-    throw new ApiError(payload.message || payload.error || `Request failed: ${response.status}`, response.status, payload);
+const DASHBOARD_SNAPSHOT_KEY = "mission-control.dashboard.snapshot";
+
+function saveDashboardSnapshot(payload) {
+  try {
+    localStorage.setItem(
+      DASHBOARD_SNAPSHOT_KEY,
+      JSON.stringify({
+        cachedAt: new Date().toISOString(),
+        payload,
+      }),
+    );
+  } catch {
+    // Ignore storage failures so the product still works in constrained browsers.
   }
-  return payload;
+}
+
+function loadDashboardSnapshot() {
+  try {
+    const raw = localStorage.getItem(DASHBOARD_SNAPSHOT_KEY);
+    if (!raw) {
+      return null;
+    }
+    const parsed = JSON.parse(raw);
+    if (!parsed?.payload) {
+      return null;
+    }
+    return {
+      ...parsed.payload,
+      runtime: {
+        ...(parsed.payload.runtime || {}),
+        offlineSnapshot: true,
+        cachedAt: parsed.cachedAt || "",
+      },
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function request(path, options = {}) {
+  try {
+    const response = await fetch(path, {
+      credentials: "include",
+      ...options,
+      headers: {
+        ...(options.body ? { "Content-Type": "application/json" } : {}),
+        ...(options.headers || {}),
+      },
+    });
+    const text = await response.text();
+    const payload = text ? JSON.parse(text) : {};
+    if (!response.ok) {
+      throw new ApiError(payload.message || payload.error || `Request failed: ${response.status}`, response.status, payload);
+    }
+    if (path === "/api/dashboard") {
+      saveDashboardSnapshot(payload);
+    }
+    return payload;
+  } catch (error) {
+    if (path === "/api/dashboard") {
+      const snapshot = loadDashboardSnapshot();
+      if (snapshot) {
+        return snapshot;
+      }
+    }
+    throw error;
+  }
 }
 
 export function getSession() {

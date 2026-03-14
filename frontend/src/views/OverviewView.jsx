@@ -1,25 +1,34 @@
 import { Card, Col, List, Row, Statistic, Table, Timeline, Typography } from "antd";
 import { metricCards, safeArray, statusTag } from "../ui.jsx";
+import {
+  ActivityTrendPanel,
+  AgentLoadPanel,
+  buildActivityTrend,
+  buildAgentLoadData,
+  buildTaskFunnel,
+  FunnelPanel,
+} from "../components/DataCharts.jsx";
 
 const { Title, Paragraph, Text } = Typography;
 
-function OverviewView({ dashboard, agents, tasks }) {
+function OverviewView({ dashboard, agents, tasks, t }) {
   const topMetrics = metricCards(dashboard.metrics).slice(0, 3);
   const flowMetrics = metricCards(dashboard.metrics).slice(3);
+  const funnelData = buildTaskFunnel(tasks);
+  const loadData = buildAgentLoadData(agents);
+  const trendData = buildActivityTrend(safeArray(dashboard.events));
 
   return (
     <div className="overview-shell">
       <section className="overview-hero">
         <div className="overview-hero-copy">
-          <Text className="section-kicker">Control Plane Snapshot</Text>
-          <Title level={1}>把协同现场、交付风险和会话压力，压缩到一张经营首页。</Title>
-          <Paragraph>
-            这一页不是简单的数据堆叠，而是给运营负责人快速判断节奏的工作台。先看当下是否稳，再决定往哪里点进去处理。
-          </Paragraph>
+          <Text className="section-kicker">{t("overview.kicker")}</Text>
+          <Title level={1}>{t("overview.title")}</Title>
+          <Paragraph>{t("overview.summary")}</Paragraph>
           <div className="overview-meta-strip">
-            <span>主题：{dashboard.theme?.displayName || "未知主题"}</span>
-            <span>路由：{dashboard.routerAgentId || "router"}</span>
-            <span>同步：{dashboard.generatedAgo || "刚刚"}</span>
+            <span>{t("overview.theme")}：{dashboard.theme?.displayName || "—"}</span>
+            <span>{t("overview.router")}：{dashboard.routerAgentId || "router"}</span>
+            <span>{t("overview.sync")}：{dashboard.generatedAgo || "—"}</span>
           </div>
         </div>
 
@@ -47,34 +56,54 @@ function OverviewView({ dashboard, agents, tasks }) {
       </Row>
 
       <Row gutter={[16, 16]}>
+        <Col xs={24} xl={8}>
+          <Card className="workspace-card" title={t("overview.charts.funnel")}>
+            <FunnelPanel data={funnelData} emptyText={t("overview.charts.emptyFunnel")} />
+          </Card>
+        </Col>
+        <Col xs={24} xl={8}>
+          <Card className="workspace-card" title={t("overview.charts.heatmap")}>
+            <AgentLoadPanel data={loadData} emptyText={t("overview.charts.emptyLoad")} />
+          </Card>
+        </Col>
+        <Col xs={24} xl={8}>
+          <Card className="workspace-card" title={t("overview.charts.gantt")}>
+            <ActivityTrendPanel data={trendData} emptyText={t("overview.charts.emptyTrend")} />
+          </Card>
+        </Col>
+      </Row>
+
+      <Row gutter={[16, 16]}>
         <Col xs={24} xl={12}>
-          <Card className="workspace-card" title="Agent 现场" extra={<Text type="secondary">{agents.length} 个</Text>}>
+          <Card className="workspace-card" title={t("overview.agentBoard")} extra={<Text type="secondary">{agents.length} {t("overview.agentCountSuffix")}</Text>}>
             <Table
               size="small"
               pagination={false}
               rowKey="id"
+              scroll={{ x: 620 }}
               columns={[
-                { title: "Agent", dataIndex: "title" },
-                { title: "状态", dataIndex: "status", render: (value) => statusTag(value) },
-                { title: "任务", dataIndex: "activeTasks" },
-                { title: "阻塞", dataIndex: "blockedTasks" },
-                { title: "最近信号", dataIndex: "lastSeenAgo" },
+                { title: t("overview.columns.agent"), dataIndex: "title" },
+                { title: t("overview.columns.status"), dataIndex: "status", render: (value) => statusTag(value) },
+                { title: t("overview.columns.tasks"), dataIndex: "activeTasks" },
+                { title: t("overview.columns.blocked"), dataIndex: "blockedTasks" },
+                { title: t("overview.columns.recentSignal"), dataIndex: "lastSeenAgo" },
               ]}
               dataSource={agents.slice(0, 8)}
             />
           </Card>
         </Col>
         <Col xs={24} xl={12}>
-          <Card className="workspace-card" title="交付河道" extra={<Text type="secondary">{tasks.length} 条</Text>}>
+          <Card className="workspace-card" title={t("overview.taskBoard")} extra={<Text type="secondary">{tasks.length} {t("overview.taskCountSuffix")}</Text>}>
             <Table
               size="small"
               pagination={false}
               rowKey="id"
+              scroll={{ x: 620 }}
               columns={[
-                { title: "任务", dataIndex: "id" },
-                { title: "标题", dataIndex: "title", ellipsis: true },
-                { title: "状态", dataIndex: "state", render: (value) => statusTag(value) },
-                { title: "负责人", dataIndex: "currentAgentLabel", ellipsis: true },
+                { title: t("overview.columns.taskId"), dataIndex: "id" },
+                { title: t("overview.columns.taskTitle"), dataIndex: "title", ellipsis: true },
+                { title: t("overview.columns.status"), dataIndex: "state", render: (value) => statusTag(value) },
+                { title: t("overview.columns.owner"), dataIndex: "currentAgentLabel", ellipsis: true },
               ]}
               dataSource={tasks.slice(0, 8)}
             />
@@ -82,7 +111,7 @@ function OverviewView({ dashboard, agents, tasks }) {
         </Col>
 
         <Col xs={24} xl={14}>
-          <Card className="workspace-card" title="最近活动">
+          <Card className="workspace-card" title={t("overview.recentActivity")}>
             <Timeline
               items={safeArray(dashboard.events).slice(0, 8).map((event) => ({
                 color: event.type === "progress" ? "green" : "orange",
@@ -90,7 +119,7 @@ function OverviewView({ dashboard, agents, tasks }) {
                   <div>
                     <Text strong>{event.headline || event.title}</Text>
                     <br />
-                    <Text type="secondary">{event.detail || "无额外信息"}</Text>
+                    <Text type="secondary">{event.detail || t("overview.columns.noDetail")}</Text>
                   </div>
                 ),
               }))}
@@ -98,20 +127,20 @@ function OverviewView({ dashboard, agents, tasks }) {
           </Card>
         </Col>
         <Col xs={24} xl={10}>
-          <Card className="workspace-card" title="需要你留意的信号">
+          <Card className="workspace-card" title={t("overview.attention")}>
             <List
               dataSource={[
                 {
-                  title: "阻塞任务",
-                  detail: `${dashboard.metrics?.blockedTasks || 0} 条任务需要治理动作`,
+                  title: t("overview.signals.blockedTitle"),
+                  detail: `${dashboard.metrics?.blockedTasks || 0} ${t("overview.signals.blockedDetail")}`,
                 },
                 {
-                  title: "交接节奏",
-                  detail: `最近 24h 完成 ${dashboard.metrics?.handoffs24h || 0} 次 handoff`,
+                  title: t("overview.signals.handoffTitle"),
+                  detail: `${dashboard.metrics?.handoffs24h || 0} ${t("overview.signals.handoffDetail")}`,
                 },
                 {
-                  title: "会话热度",
-                  detail: `最近 1h 收到 ${dashboard.metrics?.signals1h || 0} 条协同信号`,
+                  title: t("overview.signals.sessionTitle"),
+                  detail: `${dashboard.metrics?.signals1h || 0} ${t("overview.signals.sessionDetail")}`,
                 },
               ]}
               renderItem={(item) => (

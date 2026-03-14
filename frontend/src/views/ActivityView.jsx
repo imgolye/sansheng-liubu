@@ -1,29 +1,30 @@
-import { Card, Col, List, Row, Timeline, Typography } from "antd";
+import { Card, Col, Row, Timeline, Typography } from "antd";
 import { safeArray } from "../ui.jsx";
+import { ActivityTrendPanel, buildActivityTrend, RelayNetworkPanel } from "../components/DataCharts.jsx";
 
 const { Text } = Typography;
 
-function ActivityView({ dashboard }) {
+function ActivityView({ dashboard, t }) {
+  const trendData = buildActivityTrend(safeArray(dashboard.events));
+
   return (
     <Row gutter={[16, 16]}>
       <Col xs={24} xl={10}>
-        <Card title="接力关系">
-          <List
-            dataSource={safeArray(dashboard.relays)}
-            locale={{ emptyText: "最近 24 小时还没有形成 handoff 网络。" }}
-            renderItem={(relay) => (
-              <List.Item>
-                <List.Item.Meta
-                  title={`${relay.from} → ${relay.to}`}
-                  description={`次数 ${relay.count} · 最近 ${relay.lastAgo}`}
-                />
-              </List.Item>
-            )}
+        <Card title={t("activity.relayTitle")} className="workspace-card">
+          <RelayNetworkPanel
+            relays={safeArray(dashboard.relays)}
+            emptyText={t("activity.emptyRelay")}
+            edgeLabel={t("activity.handoffCount")}
           />
         </Card>
       </Col>
       <Col xs={24} xl={14}>
-        <Card title="完整时间线">
+        <Card title={t("activity.trendTitle")} className="workspace-card">
+          <ActivityTrendPanel data={trendData} emptyText={t("overview.charts.emptyTrend")} />
+        </Card>
+      </Col>
+      <Col xs={24}>
+        <Card title={t("activity.timelineTitle")} className="workspace-card">
           <Timeline
             items={safeArray(dashboard.events).map((event) => ({
               color: event.type === "progress" ? "green" : "orange",
@@ -31,7 +32,7 @@ function ActivityView({ dashboard }) {
                 <div>
                   <Text strong>{event.headline || event.title}</Text>
                   <br />
-                  <Text type="secondary">{event.detail}</Text>
+                  <Text type="secondary">{event.detail || t("activity.noDetail")}</Text>
                 </div>
               ),
             }))}

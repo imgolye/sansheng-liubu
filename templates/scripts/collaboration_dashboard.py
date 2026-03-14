@@ -105,18 +105,21 @@ THEME_STYLES = {
 THEME_CATALOG = {
     "imperial": {
         "displayName": "三省六部",
+        "language": "zh-CN",
         "tagline": "层级清晰，适合复杂任务编排",
         "bestFor": "个人玩家、极客、强流程任务",
         "summary": "强调审议、调度和六部协作，适合希望把复杂任务拆成正式流转的人。",
     },
     "corporate": {
         "displayName": "企业组织",
+        "language": "en",
         "tagline": "更像 CEO / VP / Team 的现代协同方式",
         "bestFor": "企业团队、正式场景、跨职能配合",
         "summary": "用更贴近公司组织的命名和职责，让多 Agent 协同更容易被业务团队理解。",
     },
     "startup": {
         "displayName": "创业团队",
+        "language": "zh-CN",
         "tagline": "扁平直接，适合小团队高速迭代",
         "bestFor": "创业公司、产品开发、小规模团队",
         "summary": "减少流程负担，让 PM、全栈、测试、运营等角色快速接力推进。",
@@ -6710,6 +6713,7 @@ def build_dashboard_data(openclaw_dir):
             {
                 "name": theme_key,
                 "displayName": meta["displayName"],
+                "language": meta.get("language", "zh-CN"),
                 "tagline": meta["tagline"],
                 "bestFor": meta["bestFor"],
                 "summary": meta["summary"],
@@ -6761,6 +6765,7 @@ def build_dashboard_data(openclaw_dir):
         "theme": {
             "name": theme_name,
             "displayName": metadata.get("displayName", theme_name),
+            "language": THEME_CATALOG.get(theme_name, {}).get("language", "zh-CN"),
             "styles": theme_style,
         },
         "themeCatalog": theme_catalog,

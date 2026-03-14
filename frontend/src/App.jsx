@@ -2,17 +2,22 @@ import { lazy, startTransition, Suspense, useDeferredValue, useEffect, useState 
 import { useLocation, useNavigate } from "react-router-dom";
 import {
   App as AntdApp,
+  Alert,
   Badge,
   Button,
   Card,
+  ConfigProvider,
   Input,
   Layout,
   Menu,
+  Segmented,
   Space,
   Spin,
   Tag,
   Typography,
 } from "antd";
+import enUS from "antd/locale/en_US";
+import zhCN from "antd/locale/zh_CN";
 import {
   ApiOutlined,
   ApartmentOutlined,
@@ -28,6 +33,7 @@ import {
 } from "@ant-design/icons";
 import { ApiError, getConversationTranscript, getDashboard, getSession, loginWithPassword, loginWithToken, logout, postAction } from "./api";
 import { safeArray } from "./ui.jsx";
+import { buildTranslator, normalizeLocale } from "./i18n.jsx";
 
 const { Header, Sider, Content } = Layout;
 const { Title, Paragraph, Text } = Typography;
@@ -48,24 +54,28 @@ const AgentDrawer = lazy(() => import("./components/AgentDrawer"));
 const TaskDrawer = lazy(() => import("./components/TaskDrawer"));
 const CreateTaskModal = lazy(() => import("./components/CreateTaskModal"));
 
-const MENU_ITEMS = [
-  { key: "/overview", icon: <DashboardOutlined />, label: "总览" },
-  { key: "/management", icon: <DeploymentUnitOutlined />, label: "端到端管理" },
-  { key: "/agents", icon: <TeamOutlined />, label: "Agent 运营" },
-  { key: "/tasks", icon: <UnorderedListOutlined />, label: "交付执行" },
-  { key: "/conversations", icon: <CommentOutlined />, label: "会话中心" },
-  { key: "/activity", icon: <ThunderboltOutlined />, label: "活动时间线" },
-  { key: "/themes", icon: <ApartmentOutlined />, label: "主题中心" },
-  { key: "/skills", icon: <SettingOutlined />, label: "Skills Center" },
-  { key: "/openclaw", icon: <ApiOutlined />, label: "OpenClaw" },
-  { key: "/admin", icon: <SettingOutlined />, label: "商业后台" },
-];
+const LOCALE_STORAGE_KEY = "mission-control.locale";
 
 function normalizePath(pathname) {
   if (!pathname || pathname === "/") {
     return "/overview";
   }
   return pathname;
+}
+
+function menuItems(t) {
+  return [
+    { key: "/overview", icon: <DashboardOutlined />, label: t("menu.overview") },
+    { key: "/management", icon: <DeploymentUnitOutlined />, label: t("menu.management") },
+    { key: "/agents", icon: <TeamOutlined />, label: t("menu.agents") },
+    { key: "/tasks", icon: <UnorderedListOutlined />, label: t("menu.tasks") },
+    { key: "/conversations", icon: <CommentOutlined />, label: t("menu.conversations") },
+    { key: "/activity", icon: <ThunderboltOutlined />, label: t("menu.activity") },
+    { key: "/themes", icon: <ApartmentOutlined />, label: t("menu.themes") },
+    { key: "/skills", icon: <SettingOutlined />, label: t("menu.skills") },
+    { key: "/openclaw", icon: <ApiOutlined />, label: t("menu.openclaw") },
+    { key: "/admin", icon: <SettingOutlined />, label: t("menu.admin") },
+  ];
 }
 
 function App() {
@@ -84,8 +94,20 @@ function App() {
   const [transcript, setTranscript] = useState(null);
   const [transcriptLoading, setTranscriptLoading] = useState(false);
   const [createTaskOpen, setCreateTaskOpen] = useState(false);
+  const [localePreference, setLocalePreference] = useState(() => {
+    try {
+      return localStorage.getItem(LOCALE_STORAGE_KEY) || "auto";
+    } catch {
+      return "auto";
+    }
+  });
+  const [isOffline, setIsOffline] = useState(() => !navigator.onLine);
   const currentPath = normalizePath(location.pathname);
   const deferredSearch = useDeferredValue(search);
+  const localeKey = localePreference === "auto" ? normalizeLocale(dashboard?.theme?.language) : normalizeLocale(localePreference);
+  const t = buildTranslator(localeKey);
+  const currentAntdLocale = localeKey === "en" ? enUS : zhCN;
+  const currentMenuItems = menuItems(t);
 
   async function refreshDashboard({ silent = false } = {}) {
     if (!session) {
@@ -158,6 +180,29 @@ function App() {
     return () => window.clearInterval(timer);
   }, [session]);
 
+  useEffect(() => {
+    try {
+      localStorage.setItem(LOCALE_STORAGE_KEY, localePreference);
+    } catch {
+      // Ignore storage failures.
+    }
+  }, [localePreference]);
+
+  useEffect(() => {
+    function handleOnline() {
+      setIsOffline(false);
+    }
+    function handleOffline() {
+      setIsOffline(true);
+    }
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
+    return () => {
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("offline", handleOffline);
+    };
+  }, []);
+
   const permissions = dashboard?.runtime?.permissions || session?.permissions || {};
   const actionToken = dashboard?.runtime?.actionToken || session?.actionToken || "";
   const normalizedSearch = deferredSearch.trim().toLowerCase();
@@ -173,6 +218,7 @@ function App() {
   const selectedAgent = agents.find((agent) => agent.id === selectedAgentId) || null;
   const selectedTask = tasks.find((task) => task.id === selectedTaskId) || null;
   const selectedConversation = sessions.find((item) => item.key === selectedConversationKey) || null;
+  const isSnapshot = Boolean(dashboard?.runtime?.offlineSnapshot);
 
   async function runAction(path, payload, successMessage) {
     try {
@@ -201,7 +247,7 @@ function App() {
       const payload = await getDashboard();
       setDashboard(payload);
       navigate("/overview", { replace: true });
-      message.success("登录成功");
+      message.success(localeKey === "en" ? "Signed in" : "登录成功");
     } catch (error) {
       message.error(error.message);
     } finally {
@@ -218,7 +264,7 @@ function App() {
       const payload = await getDashboard();
       setDashboard(payload);
       navigate("/overview", { replace: true });
-      message.success("登录成功");
+      message.success(localeKey === "en" ? "Signed in" : "登录成功");
     } catch (error) {
       message.error(error.message);
     } finally {
@@ -256,7 +302,7 @@ function App() {
   }
 
   function renderCurrentView() {
-    const viewProps = { dashboard, agents, tasks, permissions, sessions };
+    const viewProps = { dashboard, agents, tasks, permissions, sessions, t, localeKey };
     switch (currentPath) {
       case "/agents":
         return <AgentsView {...viewProps} onSelectAgent={setSelectedAgentId} />;
@@ -334,6 +380,7 @@ function App() {
     return (
       <Suspense fallback={<div className="center-screen"><Spin size="large" /></div>}>
         <LoginPage
+          t={t}
           authMode={authMode}
           loading={loading}
           onPasswordLogin={handlePasswordLogin}
@@ -343,10 +390,20 @@ function App() {
     );
   }
 
-  const visibleMenuItems = MENU_ITEMS.filter((item) => item.key !== "/admin" || permissions.auditView || permissions.adminWrite);
+  const visibleMenuItems = currentMenuItems.filter((item) => item.key !== "/admin" || permissions.auditView || permissions.adminWrite);
 
   return (
-    <>
+    <ConfigProvider
+      locale={currentAntdLocale}
+      theme={{
+        token: {
+          colorPrimary: "#b34722",
+          borderRadius: 10,
+          fontFamily: '"IBM Plex Sans", "Segoe UI", sans-serif',
+          colorBgLayout: "#f5f7fa",
+        },
+      }}
+    >
       <Layout className="mission-layout">
         <Sider theme="light" width={236} breakpoint="lg" collapsedWidth={88} className="mission-sider">
           <div className="brand-panel">
@@ -354,10 +411,10 @@ function App() {
             <Text className="section-kicker">Sansheng Liubu</Text>
             <Title level={3}>Mission Control</Title>
             <Paragraph type="secondary">
-              商业化多 Agent 控制平面。统一查看协同、交付、对话和治理动作。
+              {t("app.shellSummary")}
             </Paragraph>
             <div className="brand-chip-row">
-              <Tag color="processing">{dashboard?.theme?.displayName || "未知主题"}</Tag>
+              <Tag color="processing">{dashboard?.theme?.displayName || t("common.unknown")}</Tag>
               <Tag>{dashboard?.routerAgentId || "router"}</Tag>
             </div>
           </div>
@@ -374,19 +431,29 @@ function App() {
         <Layout>
           <Header className="mission-header">
             <div className="header-intro">
-              <Text className="section-kicker">Operations Layer</Text>
-              <Title level={2}>{visibleMenuItems.find((item) => item.key === currentPath)?.label || "总览"}</Title>
+              <Text className="section-kicker">{t("app.operationsLayer")}</Text>
+              <Title level={2}>{visibleMenuItems.find((item) => item.key === currentPath)?.label || t("menu.overview")}</Title>
               <div className="header-meta">
-                <Text type="secondary">{dashboard?.ownerTitle || "Mission Control"}</Text>
+                <Text type="secondary">{dashboard?.ownerTitle || t("app.missionControl")}</Text>
                 <span className="header-dot" />
                 <Text type="secondary">{dashboard?.openclawDir || ""}</Text>
               </div>
             </div>
 
             <Space wrap size={12} className="header-tools">
+              <Segmented
+                size="small"
+                value={localePreference}
+                options={[
+                  { value: "auto", label: t("common.auto") },
+                  { value: "zh", label: t("common.chinese") },
+                  { value: "en", label: t("common.english") },
+                ]}
+                onChange={(value) => setLocalePreference(String(value))}
+              />
               <Input.Search
                 allowClear
-                placeholder="搜索 Agent、任务、会话、主题"
+                placeholder={t("common.searchPlaceholder")}
                 value={search}
                 onChange={(event) => {
                   const nextValue = event.target.value;
@@ -396,18 +463,24 @@ function App() {
                 }}
                 style={{ width: 320 }}
               />
-              <Badge status="processing" text={`最近同步 ${dashboard?.generatedAgo || "刚刚"}`} />
+              <Badge status="processing" text={`${t("app.headerSubtitle")} ${dashboard?.generatedAgo || t("common.justNow")}`} />
               <Tag color="gold">{session?.session?.displayName || "Local Access"}</Tag>
               <Button icon={<ReloadOutlined />} loading={loading} onClick={() => refreshDashboard()}>
-                立即刷新
+                {t("common.refresh")}
               </Button>
               <Button icon={<LogoutOutlined />} onClick={handleLogout}>
-                退出
+                {t("common.logout")}
               </Button>
             </Space>
           </Header>
 
           <Content className="mission-content">
+            {isOffline ? (
+              <Alert type="warning" banner showIcon={false} message={t("app.offlineBanner")} style={{ marginBottom: 16 }} />
+            ) : null}
+            {isSnapshot ? (
+              <Alert type="info" banner showIcon={false} message={t("app.staleBanner")} style={{ marginBottom: 16 }} />
+            ) : null}
             {!dashboard ? (
               <Card>
                 <Spin />
@@ -439,7 +512,7 @@ function App() {
           }}
         />
       </Suspense>
-    </>
+    </ConfigProvider>
   );
 }
 

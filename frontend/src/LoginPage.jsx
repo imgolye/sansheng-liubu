@@ -3,7 +3,7 @@ import { Button, Card, Form, Input, Space, Tabs, Tag, Typography } from "antd";
 const { Title, Paragraph, Text } = Typography;
 const { Password } = Input;
 
-function LoginPage({ authMode, loading, onPasswordLogin, onTokenLogin }) {
+function LoginPage({ authMode, loading, onPasswordLogin, onTokenLogin, t }) {
   const [passwordForm] = Form.useForm();
   const [tokenForm] = Form.useForm();
 
@@ -11,42 +11,41 @@ function LoginPage({ authMode, loading, onPasswordLogin, onTokenLogin }) {
     <div className="login-screen">
       <div className="login-hero">
         <div className="hero-headline">
-          <Text className="section-kicker">Mission Control</Text>
-          <Tag color="gold">Commercial Edition</Tag>
+          <Text className="section-kicker">{t("login.mission")}</Text>
+          <Tag color="gold">{t("login.edition")}</Tag>
         </div>
-        <Title level={1}>把多 Agent 协同，做成能运营、能治理、能成交的产品。</Title>
+        <Title level={1}>{t("login.heroTitle")}</Title>
         <Paragraph className="hero-summary">
-          现在打开的不是实验面板，而是一套面向业务负责人的控制平面。你可以在同一个产品里看到协同状态、推进任务、
-          直接对话、切换主题，并持续治理团队与安装实例。
+          {t("login.heroSummary")}
         </Paragraph>
 
         <div className="hero-proofband">
           <div>
             <Text className="hero-proof-number">11</Text>
-            <Text className="hero-proof-label">协作 Agent</Text>
+            <Text className="hero-proof-label">{t("login.proofAgents")}</Text>
           </div>
           <div>
             <Text className="hero-proof-number">API</Text>
-            <Text className="hero-proof-label">前后端分离</Text>
+            <Text className="hero-proof-label">{t("login.proofSeparation")}</Text>
           </div>
           <div>
             <Text className="hero-proof-number">Live</Text>
-            <Text className="hero-proof-label">任务与会话运营</Text>
+            <Text className="hero-proof-label">{t("login.proofLive")}</Text>
           </div>
         </div>
 
         <div className="login-points">
           <Card size="small" className="feature-card feature-card-accent">
-            <Text strong>统一经营视图</Text>
-            <Paragraph type="secondary">协同、交付、会话、技能、OpenClaw 运行态放进同一条运营视线。</Paragraph>
+            <Text strong>{t("login.cardUnified")}</Text>
+            <Paragraph type="secondary">{t("login.cardUnifiedDesc")}</Paragraph>
           </Card>
           <Card size="small" className="feature-card">
-            <Text strong>API-first Product Core</Text>
-            <Paragraph type="secondary">账号、会话状态、任务动作、主题切换和治理接口全部独立输出。</Paragraph>
+            <Text strong>{t("login.cardApi")}</Text>
+            <Paragraph type="secondary">{t("login.cardApiDesc")}</Paragraph>
           </Card>
           <Card size="small" className="feature-card">
-            <Text strong>渐进替换旧入口</Text>
-            <Paragraph type="secondary">新版产品壳走独立前端，旧版 `/legacy` 入口仍保留，迁移不会硬切。</Paragraph>
+            <Text strong>{t("login.cardLegacy")}</Text>
+            <Paragraph type="secondary">{t("login.cardLegacyDesc")}</Paragraph>
           </Card>
         </div>
       </div>
@@ -54,11 +53,11 @@ function LoginPage({ authMode, loading, onPasswordLogin, onTokenLogin }) {
       <Card className="login-card" bordered={false}>
         <Space direction="vertical" size={20} style={{ width: "100%" }}>
           <div>
-            <Text className="section-kicker">Secure Access</Text>
-            <Title level={2}>进入 Mission Control</Title>
-            <Paragraph type="secondary">优先使用团队账号；Owner Token 只保留给初始化和紧急接管。</Paragraph>
+            <Text className="section-kicker">{t("login.secureAccess")}</Text>
+            <Title level={2}>{t("login.enter")}</Title>
+            <Paragraph type="secondary">{t("login.enterSummary")}</Paragraph>
             <Tag color={authMode === "accounts" ? "processing" : "warning"}>
-              {authMode === "accounts" ? "团队账号优先" : authMode === "open" ? "开放模式" : "Token Bootstrap"}
+              {authMode === "accounts" ? t("login.accountsFirst") : authMode === "open" ? t("login.openMode") : t("login.tokenBootstrap")}
             </Tag>
           </div>
 
@@ -66,35 +65,35 @@ function LoginPage({ authMode, loading, onPasswordLogin, onTokenLogin }) {
             items={[
               {
                 key: "password",
-                label: "团队账号",
+                label: t("login.passwordTab"),
                 children: (
                   <Form
                     form={passwordForm}
                     layout="vertical"
                     onFinish={(values) => onPasswordLogin(values.username, values.password)}
                   >
-                    <Form.Item label="用户名" name="username" rules={[{ required: true, message: "请输入用户名" }]}>
-                      <Input placeholder="owner / alice@company" size="large" />
+                    <Form.Item label={t("login.username")} name="username" rules={[{ required: true, message: t("login.usernameRequired") }]}>
+                      <Input placeholder={t("login.usernamePlaceholder")} size="large" />
                     </Form.Item>
-                    <Form.Item label="密码" name="password" rules={[{ required: true, message: "请输入密码" }]}>
-                      <Password placeholder="输入团队账号密码" size="large" />
+                    <Form.Item label={t("login.password")} name="password" rules={[{ required: true, message: t("login.passwordRequired") }]}>
+                      <Password placeholder={t("login.passwordPlaceholder")} size="large" />
                     </Form.Item>
                     <Button type="primary" htmlType="submit" block size="large" loading={loading}>
-                      团队登录
+                      {t("login.teamLogin")}
                     </Button>
                   </Form>
                 ),
               },
               {
                 key: "token",
-                label: "Owner Token",
+                label: t("login.tokenTab"),
                 children: (
                   <Form form={tokenForm} layout="vertical" onFinish={(values) => onTokenLogin(values.token)}>
-                    <Form.Item label="Token" name="token" rules={[{ required: true, message: "请输入 Owner Token" }]}>
-                      <Password placeholder="输入本地 dashboard token" size="large" />
+                    <Form.Item label={t("login.token")} name="token" rules={[{ required: true, message: t("login.tokenRequired") }]}>
+                      <Password placeholder={t("login.tokenPlaceholder")} size="large" />
                     </Form.Item>
                     <Button type="default" htmlType="submit" block size="large" loading={loading}>
-                      使用 Token 进入
+                      {t("login.tokenLogin")}
                     </Button>
                   </Form>
                 ),

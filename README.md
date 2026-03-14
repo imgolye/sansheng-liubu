@@ -4,20 +4,21 @@
 
 一键部署 11 个协作 AI Agent，模拟组织架构处理复杂任务。
 
-## 1.5.0 亮点
+## 1.6.0 亮点
 
-现在不只是能跑多 Agent，还能让用户看到协同正在发生：
+现在不只是一个“实时大屏”，而是一套本地可用的多 Agent 产品：
 
 ```bash
 python3 ~/.openclaw/workspace-your-router-id/scripts/collaboration_dashboard.py --serve
 ```
 
 这一版新增：
-- 协同态势看板：看到谁在执行、谁在等待、任务如何接力
-- HTML + JSON 双输出：适合浏览器查看，也适合后续接系统面板
-- 本地实时 Web 面板：`--serve` 会启动带 SSE 推送的常驻监控页
-- Agent 明细抽屉：点任意 Agent 卡片可查看最近信号、在手任务和接力强度
-- 任务回放抽屉：点任务卡片或时间线事件可展开完整 handoff/progress 回放
+- 多模块 Mission Control：总览、Agent 运营、交付执行、活动时间线、主题中心
+- 本地实时 Web 应用：`--serve` 会启动带 SSE 推送的常驻产品面板
+- 深链接路由：`/agents`、`/tasks`、`/activity`、`/themes`
+- 本地 API：`/api/agents`、`/api/tasks`、`/api/events`、`/api/themes`、`/api/deliverables`
+- 全局搜索、任务筛选、交付物列表、产品内置 runbook
+- Agent 明细抽屉与任务回放抽屉仍然保留
 - 运行中切换主题：`bash bin/switch_theme.sh --theme startup`
 - 自动迁移：保留现有频道、模型、网关 token、任务板和 workspace 产物
 
@@ -148,6 +149,16 @@ http://127.0.0.1:18890/collaboration-dashboard.html
 ```
 
 它会通过 Server-Sent Events 实时接收任务与协同变化，不再整页重载。
+
+如果通过本地服务访问，现在还可以直接打开这些模块：
+
+```text
+http://127.0.0.1:18890/
+http://127.0.0.1:18890/agents
+http://127.0.0.1:18890/tasks
+http://127.0.0.1:18890/activity
+http://127.0.0.1:18890/themes
+```
 
 现在还能直接点开：
 

@@ -60,6 +60,27 @@ THEME_STYLES = {
     },
 }
 
+THEME_CATALOG = {
+    "imperial": {
+        "displayName": "三省六部",
+        "tagline": "层级清晰，适合复杂任务编排",
+        "bestFor": "个人玩家、极客、强流程任务",
+        "summary": "强调审议、调度和六部协作，适合希望把复杂任务拆成正式流转的人。",
+    },
+    "corporate": {
+        "displayName": "企业组织",
+        "tagline": "更像 CEO / VP / Team 的现代协同方式",
+        "bestFor": "企业团队、正式场景、跨职能配合",
+        "summary": "用更贴近公司组织的命名和职责，让多 Agent 协同更容易被业务团队理解。",
+    },
+    "startup": {
+        "displayName": "创业团队",
+        "tagline": "扁平直接，适合小团队高速迭代",
+        "bestFor": "创业公司、产品开发、小规模团队",
+        "summary": "减少流程负担，让 PM、全栈、测试、运营等角色快速接力推进。",
+    },
+}
+
 
 HTML_TEMPLATE = """<!doctype html>
 <html lang="zh-CN">
@@ -679,21 +700,294 @@ __STYLE_VARS__
       text-transform: uppercase;
       letter-spacing: 0.08em;
     }
+    .app-shell {
+      width: min(1720px, calc(100vw - 24px));
+      margin: 12px auto 28px;
+      display: grid;
+      grid-template-columns: 280px minmax(0, 1fr);
+      gap: 18px;
+      align-items: start;
+    }
+    .rail {
+      position: sticky;
+      top: 12px;
+      display: grid;
+      gap: 14px;
+      align-self: start;
+    }
+    .brand-card,
+    .rail-panel,
+    .topbar {
+      border-radius: 26px;
+      border: 1px solid var(--line);
+      background: var(--panel);
+      box-shadow: var(--shadow-soft);
+    }
+    .brand-card,
+    .rail-panel {
+      padding: 18px;
+    }
+    .brand-card h2 {
+      margin: 12px 0 8px;
+      font-family: "Fraunces", "Times New Roman", serif;
+      font-size: 2rem;
+      line-height: 0.95;
+    }
+    .rail-copy,
+    .topbar-subtitle,
+    .rail-muted,
+    .status-note,
+    .path-line,
+    .command-desc {
+      color: var(--muted);
+      line-height: 1.65;
+    }
+    .rail-label,
+    .topbar-kicker {
+      color: var(--accentStrong);
+      font-size: 0.78rem;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      font-weight: 700;
+    }
+    .nav-stack {
+      display: grid;
+      gap: 8px;
+    }
+    .nav-link {
+      appearance: none;
+      width: 100%;
+      text-align: left;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: rgba(255,255,255,0.62);
+      padding: 13px 14px;
+      color: var(--ink);
+      cursor: pointer;
+      font-weight: 700;
+      transition: transform 140ms ease-out, border-color 140ms ease-out, background 140ms ease-out;
+    }
+    .nav-link span {
+      display: block;
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 0.88rem;
+      font-weight: 500;
+    }
+    .nav-link:hover { transform: translateY(-1px); }
+    .nav-link[data-active="true"] {
+      background: color-mix(in srgb, var(--accentSoft) 36%, white 64%);
+      border-color: color-mix(in srgb, var(--accent) 28%, var(--line));
+    }
+    .rail-grid,
+    .status-strip,
+    .command-list,
+    .deliverable-list,
+    .theme-grid {
+      display: grid;
+      gap: 12px;
+    }
+    .rail-grid {
+      grid-template-columns: 1fr;
+    }
+    .rail-kv {
+      padding: 12px 13px;
+      border-radius: 16px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,0.58);
+    }
+    .rail-kv strong,
+    .status-card strong {
+      display: block;
+      margin-top: 6px;
+      font-size: 1.1rem;
+    }
+    .workspace-shell {
+      min-width: 0;
+      display: grid;
+      gap: 18px;
+    }
+    .topbar {
+      padding: 18px 20px;
+      display: grid;
+      grid-template-columns: auto minmax(260px, 1fr) auto;
+      gap: 16px;
+      align-items: center;
+    }
+    .topbar-title {
+      margin-top: 6px;
+      font-family: "Fraunces", "Times New Roman", serif;
+      font-size: 2rem;
+      line-height: 0.95;
+    }
+    .search-shell {
+      display: flex;
+      align-items: center;
+    }
+    .search-input {
+      width: 100%;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,0.72);
+      color: var(--ink);
+      padding: 13px 18px;
+      outline: none;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.55);
+    }
+    .search-input:focus {
+      border-color: color-mix(in srgb, var(--accent) 34%, var(--line));
+      box-shadow: 0 0 0 4px rgba(203, 90, 30, 0.08);
+    }
+    .view-stack,
+    .overview-grid {
+      display: grid;
+      gap: 18px;
+    }
+    .overview-grid {
+      grid-template-columns: 1.12fr 1.12fr 0.96fr;
+      align-items: start;
+    }
+    .split-grid {
+      display: grid;
+      grid-template-columns: 1.25fr 0.95fr;
+      gap: 18px;
+      align-items: start;
+    }
+    .view[hidden] {
+      display: none !important;
+    }
+    .status-strip {
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+    }
+    .status-card,
+    .deliverable-card,
+    .theme-card,
+    .command-card {
+      padding: 16px;
+      border-radius: 20px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,0.62);
+    }
+    .status-card {
+      min-height: 112px;
+    }
+    .status-card span {
+      color: var(--muted);
+      font-size: 0.8rem;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      font-weight: 700;
+    }
+    .status-note {
+      margin-top: 8px;
+      font-size: 0.9rem;
+    }
+    .filter-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .filter-chip {
+      appearance: none;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: rgba(255,255,255,0.72);
+      color: var(--ink);
+      padding: 8px 12px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .filter-chip[data-active="true"] {
+      background: color-mix(in srgb, var(--accentSoft) 32%, white 68%);
+      border-color: color-mix(in srgb, var(--accent) 28%, var(--line));
+    }
+    .deliverable-card,
+    .theme-card,
+    .command-card {
+      display: grid;
+      gap: 10px;
+    }
+    .deliverable-head,
+    .theme-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: start;
+      gap: 12px;
+    }
+    .deliverable-title,
+    .theme-title {
+      font-weight: 700;
+      font-size: 1.04rem;
+      line-height: 1.42;
+    }
+    .list-meta {
+      color: var(--muted);
+      font-size: 0.92rem;
+      line-height: 1.55;
+    }
+    .path-line,
+    .code-line {
+      padding: 12px 14px;
+      border-radius: 16px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,0.7);
+      font-family: "IBM Plex Mono", "SFMono-Regular", monospace;
+      font-size: 0.84rem;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+    .theme-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 11px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      font-size: 0.8rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      background: rgba(255,255,255,0.7);
+    }
+    .theme-card[data-current="true"] {
+      border-color: color-mix(in srgb, var(--accent) 28%, var(--line));
+      box-shadow: 0 14px 30px rgba(70, 44, 28, 0.08);
+    }
+    .panel-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+    }
+    .topbar-tools {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: end;
+      gap: 10px;
+      align-items: center;
+    }
     @keyframes pulse {
       0% { box-shadow: 0 0 0 0 color-mix(in srgb, currentColor 28%, transparent); }
       70% { box-shadow: 0 0 0 12px color-mix(in srgb, currentColor 0%, transparent); }
       100% { box-shadow: 0 0 0 0 color-mix(in srgb, currentColor 0%, transparent); }
     }
     @media (max-width: 1240px) {
+      .app-shell { grid-template-columns: 1fr; }
+      .rail { position: static; }
+      .topbar { grid-template-columns: 1fr; }
+      .overview-grid, .split-grid { grid-template-columns: 1fr; }
+      .status-strip { grid-template-columns: repeat(3, minmax(0, 1fr)); }
       .metric-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
       .relay-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .main-grid { grid-template-columns: 1fr; }
     }
     @media (max-width: 760px) {
       .shell { width: min(100vw - 18px, 1480px); margin: 10px auto 26px; }
+      .app-shell { width: min(100vw - 14px, 1720px); margin: 8px auto 22px; }
       .hero { padding: 22px 18px 20px; border-radius: 24px; }
       .metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .relay-grid { grid-template-columns: 1fr; }
+      .status-strip { grid-template-columns: 1fr 1fr; }
       .agent-facts, .drawer-grid { grid-template-columns: 1fr 1fr; }
       .panel-head { padding: 18px 18px 10px; }
       .agent-grid, .task-list, .event-feed { padding: 16px; }
@@ -714,66 +1008,223 @@ __STYLE_VARS__
   </style>
 </head>
 <body>
-  <div class="shell">
-    <section class="hero">
-      <div class="eyebrow">Multi-Agent Mission Control</div>
-      <h1>用户终于能看到协同，甚至能点开回放。</h1>
-      <p class="lede">你不只是在看汇总指标。点任意 Agent 卡片可以打开最近信号与在手任务，点任务卡片可以展开完整接力回放。这样用户能分辨系统是在真正协同推进，还是只是静态排队。</p>
-      <div class="hero-meta">
-        <span>主题：<strong id="theme-name"></strong></span>
-        <span>主理人：<strong id="owner-title"></strong></span>
-        <span>生成时间：<strong id="generated-at"></strong></span>
-        <span>安装目录：<strong id="install-dir"></strong></span>
-      </div>
-      <div class="hero-tools">
-        <button class="button" id="refresh-now">立即刷新</button>
-        <button class="button secondary" id="toggle-refresh">暂停实时刷新</button>
-        <a class="button secondary" href="./collaboration-dashboard.json">查看 JSON 快照</a>
-        <span class="live-indicator" data-tone="idle" id="live-indicator"></span>
-      </div>
-      <div class="metric-grid" id="metric-grid"></div>
-    </section>
+  <div class="app-shell">
+    <aside class="rail">
+      <section class="brand-card">
+        <div class="eyebrow">Sansheng Liubu</div>
+        <h2>Mission Control</h2>
+        <p class="rail-copy">它现在不只是一个实时看板，而是一套本地多 Agent 产品。你可以在不同模块里看现场、交付、活动、主题和操作命令。</p>
+      </section>
 
-    <section class="panel">
-      <div class="panel-head">
+      <section class="rail-panel">
+        <div class="rail-label">产品导航</div>
+        <div class="nav-stack">
+          <button class="nav-link" data-view="overview">总览<span>关键指标、接力网和现场概览</span></button>
+          <button class="nav-link" data-view="agents">Agent 运营<span>完整 roster、状态分布和负责人现场</span></button>
+          <button class="nav-link" data-view="tasks">交付执行<span>任务河道、筛选、已完成交付物</span></button>
+          <button class="nav-link" data-view="activity">活动时间线<span>handoff 与 progress 的完整动态</span></button>
+          <button class="nav-link" data-view="themes">主题中心<span>当前组织主题与产品运行命令</span></button>
+        </div>
+      </section>
+
+      <section class="rail-panel">
+        <div class="rail-label">当前上下文</div>
+        <div class="rail-grid">
+          <div class="rail-kv">主题<strong id="rail-theme-name"></strong></div>
+          <div class="rail-kv">主理人<strong id="rail-owner-title"></strong></div>
+          <div class="rail-kv">路由 Agent<strong id="rail-router-agent"></strong></div>
+          <div class="rail-kv">安装目录<strong id="rail-install-dir"></strong></div>
+        </div>
+      </section>
+
+      <section class="rail-panel">
+        <div class="rail-label">快速动作</div>
+        <div class="command-list" id="rail-command-list"></div>
+      </section>
+    </aside>
+
+    <div class="workspace-shell">
+      <header class="topbar">
         <div>
-          <h2 class="panel-title">接力网</h2>
-          <p class="panel-subtitle">过去 24 小时最频繁的 handoff，能看出系统是不是在真正协同。</p>
+          <div class="topbar-kicker">Local Product</div>
+          <div class="topbar-title" id="view-title">Mission Control</div>
+          <div class="topbar-subtitle" id="view-subtitle">本地多 Agent 应用，不再只是单页监控。</div>
         </div>
-      </div>
-      <div class="relay-grid" id="relay-grid"></div>
-    </section>
+        <div class="search-shell">
+          <input class="search-input" id="global-search" type="search" placeholder="搜索 Agent、任务、事件、交付物">
+        </div>
+        <div class="topbar-tools">
+          <button class="button" id="refresh-now">立即刷新</button>
+          <button class="button secondary" id="toggle-refresh">暂停实时刷新</button>
+          <a class="button secondary" id="json-link" href="./collaboration-dashboard.json">查看 JSON 快照</a>
+          <span class="live-indicator" data-tone="idle" id="live-indicator"></span>
+        </div>
+      </header>
 
-    <div class="main-grid">
-      <section class="panel">
-        <div class="panel-head">
-          <div>
-            <h2 class="panel-title">Agent 现场</h2>
-            <p class="panel-subtitle">点开任意 Agent 看它最近的信号、接到的任务和手上在忙什么。</p>
-          </div>
-        </div>
-        <div class="agent-grid" id="agent-grid"></div>
-      </section>
+      <main class="view-stack">
+        <section class="view" data-view="overview">
+          <section class="hero">
+            <div class="eyebrow">Multi-Agent Product</div>
+            <h1>现在它更像一套控制台，而不是一张大屏。</h1>
+            <p class="lede">总览看势能，Agent 运营看人手，交付执行看任务，活动时间线看接力，主题中心看组织模式。你可以像用一个真正的本地产品一样管理这套多 Agent 系统。</p>
+            <div class="hero-meta">
+              <span>主题：<strong id="theme-name"></strong></span>
+              <span>主理人：<strong id="owner-title"></strong></span>
+              <span>生成时间：<strong id="generated-at"></strong></span>
+              <span>安装目录：<strong id="install-dir"></strong></span>
+            </div>
+            <div class="metric-grid" id="metric-grid"></div>
+          </section>
 
-      <section class="panel">
-        <div class="panel-head">
-          <div>
-            <h2 class="panel-title">任务河道</h2>
-            <p class="panel-subtitle">点开任务看 todo、当前负责人和完整协同回放。</p>
-          </div>
-        </div>
-        <div class="task-list" id="task-list"></div>
-      </section>
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <h2 class="panel-title">接力网</h2>
+                <p class="panel-subtitle">总览当前 24 小时最频繁的 handoff 关系，快速判断系统是不是在真正协同推进。</p>
+              </div>
+            </div>
+            <div class="relay-grid" id="overview-relay-grid"></div>
+          </section>
 
-      <section class="panel">
-        <div class="panel-head">
-          <div>
-            <h2 class="panel-title">信号时间线</h2>
-            <p class="panel-subtitle">最近发生的 handoff 与 progress。点击事件可以直接跳到任务回放。</p>
+          <div class="overview-grid">
+            <section class="panel">
+              <div class="panel-head">
+                <div>
+                  <h2 class="panel-title">现场负责人</h2>
+                  <p class="panel-subtitle">优先看最近有活跃任务或新信号的 Agent。</p>
+                </div>
+              </div>
+              <div class="agent-grid" id="overview-agent-grid"></div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-head">
+                <div>
+                  <h2 class="panel-title">任务河道</h2>
+                  <p class="panel-subtitle">这里聚焦正在执行或刚有信号变化的任务。</p>
+                </div>
+              </div>
+              <div class="task-list" id="overview-task-list"></div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-head">
+                <div>
+                  <h2 class="panel-title">最新活动</h2>
+                  <p class="panel-subtitle">最近发生的 handoff / progress，可直接跳进回放。</p>
+                </div>
+              </div>
+              <div class="event-feed" id="overview-event-feed"></div>
+            </section>
           </div>
-        </div>
-        <div class="event-feed" id="event-feed"></div>
-      </section>
+        </section>
+
+        <section class="view" data-view="agents" hidden>
+          <div class="status-strip" id="agent-status-strip"></div>
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <h2 class="panel-title">Agent 运营台</h2>
+                <p class="panel-subtitle">完整查看每个 Agent 的状态、焦点、在手任务和最近协同信号。</p>
+              </div>
+            </div>
+            <div class="agent-grid" id="agents-page-grid"></div>
+          </section>
+        </section>
+
+        <section class="view" data-view="tasks" hidden>
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <h2 class="panel-title">交付执行台</h2>
+                <p class="panel-subtitle">按阶段筛选任务，打开任务回放，直接追踪产出与阻塞。</p>
+              </div>
+              <div class="filter-row" id="task-filter-row"></div>
+            </div>
+            <div class="task-list" id="tasks-page-list"></div>
+          </section>
+
+          <div class="split-grid">
+            <section class="panel">
+              <div class="panel-head">
+                <div>
+                  <h2 class="panel-title">交付物</h2>
+                  <p class="panel-subtitle">展示已完成任务和其输出路径，方便把多 Agent 产出当成可管理资产。</p>
+                </div>
+              </div>
+              <div class="deliverable-list" id="deliverables-list"></div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-head">
+                <div>
+                  <h2 class="panel-title">本地操作</h2>
+                  <p class="panel-subtitle">产品常用命令，适合作为操作面板内置的 runbook。</p>
+                </div>
+              </div>
+              <div class="command-list" id="task-command-list"></div>
+            </section>
+          </div>
+        </section>
+
+        <section class="view" data-view="activity" hidden>
+          <div class="split-grid">
+            <section class="panel">
+              <div class="panel-head">
+                <div>
+                  <h2 class="panel-title">接力关系</h2>
+                  <p class="panel-subtitle">看过去 24 小时的 handoff 网络，从组织角度观察协同。</p>
+                </div>
+              </div>
+              <div class="relay-grid" id="activity-relay-grid"></div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-head">
+                <div>
+                  <h2 class="panel-title">完整时间线</h2>
+                  <p class="panel-subtitle">按时间顺序查看所有 handoff 和 progress 事件。</p>
+                </div>
+              </div>
+              <div class="event-feed" id="activity-event-feed"></div>
+            </section>
+          </div>
+        </section>
+
+        <section class="view" data-view="themes" hidden>
+          <div class="split-grid">
+            <section class="panel">
+              <div class="panel-head">
+                <div>
+                  <h2 class="panel-title">当前组织主题</h2>
+                  <p class="panel-subtitle">把多 Agent 组织方式、主理人身份和常用命令放到一个主题中心里。</p>
+                </div>
+              </div>
+              <div class="deliverable-list" id="current-theme-summary"></div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-head">
+                <div>
+                  <h2 class="panel-title">主题目录</h2>
+                  <p class="panel-subtitle">了解三套组织结构各自适合的协同风格和使用场景。</p>
+                </div>
+              </div>
+              <div class="theme-grid" id="theme-grid"></div>
+            </section>
+          </div>
+
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <h2 class="panel-title">运行命令</h2>
+                <p class="panel-subtitle">产品内嵌的本地 runbook，用来打开看板、导出快照和做健康检查。</p>
+              </div>
+            </div>
+            <div class="command-list" id="theme-command-list"></div>
+          </section>
+        </section>
+      </main>
     </div>
   </div>
 
@@ -794,18 +1245,64 @@ __STYLE_VARS__
   <script id="dashboard-data" type="application/json">__INITIAL_STATE__</script>
   <script>
     let state = JSON.parse(document.getElementById("dashboard-data").textContent);
+    const supportsHttp = location.protocol.startsWith("http");
+    const VIEW_META = {
+      overview: {
+        title: "Mission Control",
+        subtitle: "用产品化视角总览多 Agent 系统当前的协同势能。",
+      },
+      agents: {
+        title: "Agent 运营",
+        subtitle: "看清谁在推进、谁在等待、谁需要介入支持。",
+      },
+      tasks: {
+        title: "交付执行",
+        subtitle: "把任务河道、交付物和 runbook 放在同一个工作台。",
+      },
+      activity: {
+        title: "活动时间线",
+        subtitle: "按时间追踪 handoff 与 progress，快速还原协同路径。",
+      },
+      themes: {
+        title: "主题中心",
+        subtitle: "把组织主题、运行命令和当前上下文放进一个统一入口。",
+      },
+    };
+
     const refs = {
+      navLinks: Array.from(document.querySelectorAll(".nav-link")),
+      views: Array.from(document.querySelectorAll(".view")),
+      viewTitle: document.getElementById("view-title"),
+      viewSubtitle: document.getElementById("view-subtitle"),
+      globalSearch: document.getElementById("global-search"),
       metricGrid: document.getElementById("metric-grid"),
-      relayGrid: document.getElementById("relay-grid"),
-      agentGrid: document.getElementById("agent-grid"),
-      taskList: document.getElementById("task-list"),
-      eventFeed: document.getElementById("event-feed"),
+      overviewRelayGrid: document.getElementById("overview-relay-grid"),
+      overviewAgentGrid: document.getElementById("overview-agent-grid"),
+      overviewTaskList: document.getElementById("overview-task-list"),
+      overviewEventFeed: document.getElementById("overview-event-feed"),
+      agentStatusStrip: document.getElementById("agent-status-strip"),
+      agentsPageGrid: document.getElementById("agents-page-grid"),
+      taskFilterRow: document.getElementById("task-filter-row"),
+      tasksPageList: document.getElementById("tasks-page-list"),
+      deliverablesList: document.getElementById("deliverables-list"),
+      taskCommandList: document.getElementById("task-command-list"),
+      activityRelayGrid: document.getElementById("activity-relay-grid"),
+      activityEventFeed: document.getElementById("activity-event-feed"),
+      currentThemeSummary: document.getElementById("current-theme-summary"),
+      themeGrid: document.getElementById("theme-grid"),
+      themeCommandList: document.getElementById("theme-command-list"),
+      railThemeName: document.getElementById("rail-theme-name"),
+      railOwnerTitle: document.getElementById("rail-owner-title"),
+      railRouterAgent: document.getElementById("rail-router-agent"),
+      railInstallDir: document.getElementById("rail-install-dir"),
+      railCommandList: document.getElementById("rail-command-list"),
       generatedAt: document.getElementById("generated-at"),
       themeName: document.getElementById("theme-name"),
       ownerTitle: document.getElementById("owner-title"),
       installDir: document.getElementById("install-dir"),
       refreshNow: document.getElementById("refresh-now"),
       toggleRefresh: document.getElementById("toggle-refresh"),
+      jsonLink: document.getElementById("json-link"),
       liveIndicator: document.getElementById("live-indicator"),
       scrim: document.getElementById("scrim"),
       drawer: document.getElementById("drawer"),
@@ -815,7 +1312,6 @@ __STYLE_VARS__
       drawerClose: document.getElementById("drawer-close"),
     };
 
-    const supportsHttp = location.protocol.startsWith("http");
     let paused = false;
     let eventSource = null;
     let reconnectTimer = null;
@@ -823,6 +1319,9 @@ __STYLE_VARS__
     let connectionMode = supportsHttp ? "connecting" : "snapshot";
     let fetchInFlight = false;
     let selection = { kind: null, id: null };
+    let currentView = getViewFromLocation();
+    let searchQuery = "";
+    let taskFilter = "active";
 
     function el(tag, className, text) {
       const node = document.createElement(tag);
@@ -846,6 +1345,63 @@ __STYLE_VARS__
       refs.liveIndicator.textContent = text;
     }
 
+    function dashboardJsonHref() {
+      return supportsHttp ? "/collaboration-dashboard.json" : "./collaboration-dashboard.json";
+    }
+
+    function dashboardApiHref() {
+      return supportsHttp ? "/api/dashboard" : dashboardJsonHref();
+    }
+
+    function dashboardEventsHref() {
+      return "/events";
+    }
+
+    function getViewFromLocation() {
+      const fromHash = (location.hash || "").replace(/^#\/?/, "");
+      if (VIEW_META[fromHash]) return fromHash;
+      const mapping = {
+        "/": "overview",
+        "/overview": "overview",
+        "/collaboration-dashboard.html": "overview",
+        "/agents": "agents",
+        "/tasks": "tasks",
+        "/activity": "activity",
+        "/themes": "themes",
+      };
+      return mapping[location.pathname.replace(/\/+$/, "") || "/"] || "overview";
+    }
+
+    function viewPath(view) {
+      return view === "overview" ? "/" : `/${view}`;
+    }
+
+    function navigate(view) {
+      currentView = view;
+      if (supportsHttp) {
+        const target = viewPath(view);
+        if (location.pathname !== target) {
+          history.pushState({}, "", target);
+        }
+      } else {
+        const targetHash = view === "overview" ? "" : `#${view}`;
+        if (location.hash !== targetHash) {
+          location.hash = targetHash;
+        }
+      }
+      renderAll();
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+
+    function normalizeText(value) {
+      return String(value || "").toLowerCase();
+    }
+
+    function matchesQuery(value) {
+      if (!searchQuery) return true;
+      return normalizeText(value).includes(normalizeText(searchQuery));
+    }
+
     function mapTasks() {
       const map = new Map();
       (state.taskIndex || []).forEach((task) => map.set(task.id, task));
@@ -861,40 +1417,92 @@ __STYLE_VARS__
       return (state.agents || []).find((agent) => agent.id === agentId) || null;
     }
 
-    function renderMetrics() {
-      clearNode(refs.metricGrid);
-      const metrics = [
-        ["活跃任务", state.metrics.activeTasks, "还在推进中的任务数量"],
-        ["活跃 Agent", state.metrics.activeAgents, "当前正在处理或等待结果的 Agent"],
-        ["阻塞任务", state.metrics.blockedTasks, "需要用户介入或额外资源的任务"],
-        ["今日完成", state.metrics.completedToday, "过去 24 小时完成的任务"],
-        ["24h 接力", state.metrics.handoffs24h, "最近 24 小时 handoff 总次数"],
-        ["1h 信号", state.metrics.signals1h, "最近一小时 progress 与 handoff 信号"],
-      ];
+    function agentSearchBlob(agent) {
+      return [
+        agent.title,
+        agent.name,
+        agent.id,
+        agent.model,
+        agent.focus,
+        ...(agent.activeTaskCards || []).map((task) => task.title),
+        ...(agent.recentSignals || []).map((signal) => `${signal.title} ${signal.detail}`),
+      ].join(" ");
+    }
 
-      metrics.forEach(([label, value, note]) => {
-        const card = el("div", "metric");
-        card.append(el("div", "metric-label", label));
-        card.append(el("div", "metric-value", String(value)));
-        card.append(el("div", "metric-note", note));
-        refs.metricGrid.append(card);
+    function taskSearchBlob(task) {
+      return [
+        task.id,
+        task.title,
+        task.state,
+        task.owner,
+        task.org,
+        task.currentAgentLabel,
+        task.currentUpdate,
+        task.output,
+        ...(task.route || []),
+        ...(task.todoItems || []).map((item) => item.title),
+      ].join(" ");
+    }
+
+    function eventSearchBlob(event) {
+      return [event.headline, event.detail, event.title, event.taskId].join(" ");
+    }
+
+    function filteredAgents() {
+      return (state.agents || []).filter((agent) => matchesQuery(agentSearchBlob(agent)));
+    }
+
+    function filteredTasks() {
+      return (state.taskIndex || []).filter((task) => {
+        if (taskFilter === "active" && !task.active) return false;
+        if (taskFilter === "blocked" && !task.blocked) return false;
+        if (taskFilter === "done" && normalizeText(task.state) !== "done") return false;
+        return matchesQuery(taskSearchBlob(task));
       });
     }
 
-    function renderRelays() {
-      clearNode(refs.relayGrid);
-      if (!(state.relays || []).length) {
-        refs.relayGrid.append(el("div", "empty", "最近 24 小时还没有足够的接力记录。先运行几轮任务，协同图就会出现。"));
-        return;
-      }
+    function filteredEvents() {
+      return (state.events || []).filter((event) => matchesQuery(eventSearchBlob(event)));
+    }
 
-      state.relays.forEach((relay) => {
-        const card = el("div", "relay");
-        card.append(el("div", "relay-path", `${relay.from} → ${relay.to}`));
-        card.append(el("div", "relay-count", `${relay.count} 次`));
-        card.append(el("div", "relay-meta", `最近一次：${relay.lastAgo}`));
-        refs.relayGrid.append(card);
+    function filteredDeliverables() {
+      return (state.deliverables || []).filter((item) => matchesQuery(`${item.id} ${item.title} ${item.summary} ${item.output}`));
+    }
+
+    function copyText(text) {
+      if (navigator.clipboard && window.isSecureContext) {
+        return navigator.clipboard.writeText(text);
+      }
+      const input = document.createElement("textarea");
+      input.value = text;
+      input.style.position = "fixed";
+      input.style.opacity = "0";
+      document.body.appendChild(input);
+      input.select();
+      document.execCommand("copy");
+      input.remove();
+      return Promise.resolve();
+    }
+
+    function makeCopyButton(text, label = "复制命令") {
+      const button = el("button", "button secondary", label);
+      button.type = "button";
+      button.addEventListener("click", async () => {
+        await copyText(text);
+        const original = button.textContent;
+        button.textContent = "已复制";
+        setTimeout(() => {
+          button.textContent = original;
+        }, 1200);
       });
+      return button;
+    }
+
+    function taskTone(task) {
+      if (task.blocked) return "blocked";
+      if (!task.active) return "idle";
+      if ((task.todo && task.todo.ratio >= 70) || normalizeText(task.state) === "doing") return "active";
+      return "standby";
     }
 
     function attachOpenAgent(card, agentId) {
@@ -921,9 +1529,48 @@ __STYLE_VARS__
       });
     }
 
-    function renderAgents() {
-      clearNode(refs.agentGrid);
-      (state.agents || []).forEach((agent) => {
+    function renderMetrics() {
+      clearNode(refs.metricGrid);
+      const metrics = [
+        ["活跃任务", state.metrics.activeTasks, "仍在推进中的任务数量"],
+        ["活跃 Agent", state.metrics.activeAgents, "当前正在处理或等待反馈的 Agent"],
+        ["阻塞任务", state.metrics.blockedTasks, "需要用户介入或外部资源的任务"],
+        ["今日完成", state.metrics.completedToday, "过去 24 小时完成的任务"],
+        ["24h 接力", state.metrics.handoffs24h, "最近 24 小时 handoff 总次数"],
+        ["1h 信号", state.metrics.signals1h, "最近一小时 progress 与 handoff 信号"],
+      ];
+      metrics.forEach(([label, value, note]) => {
+        const card = el("div", "metric");
+        card.append(el("div", "metric-label", label));
+        card.append(el("div", "metric-value", String(value)));
+        card.append(el("div", "metric-note", note));
+        refs.metricGrid.append(card);
+      });
+    }
+
+    function renderRelaysInto(container, relays, emptyText) {
+      clearNode(container);
+      if (!relays.length) {
+        container.append(el("div", "empty", emptyText));
+        return;
+      }
+      relays.forEach((relay) => {
+        const card = el("div", "relay");
+        card.append(el("div", "relay-path", `${relay.from} → ${relay.to}`));
+        card.append(el("div", "relay-count", `${relay.count} 次`));
+        card.append(el("div", "relay-meta", `最近一次：${relay.lastAgo}`));
+        container.append(card);
+      });
+    }
+
+    function renderAgentsInto(container, agents, emptyText, limit = Infinity) {
+      clearNode(container);
+      const items = agents.slice(0, limit);
+      if (!items.length) {
+        container.append(el("div", "empty", emptyText));
+        return;
+      }
+      items.forEach((agent) => {
         const card = el("article", "agent-card");
         attachOpenAgent(card, agent.id);
 
@@ -948,9 +1595,7 @@ __STYLE_VARS__
         });
         card.append(facts);
 
-        const focus = el("div", "focus");
-        focus.textContent = agent.focus || "当前没有明确的 progress signal，可以继续观察下一次任务推进。";
-        card.append(focus);
+        card.append(el("div", "focus", agent.focus || "当前没有明确的 progress signal，可以继续观察下一次推进。"));
 
         const pills = el("div", "pill-row");
         if ((agent.activeTaskCards || []).length) {
@@ -968,19 +1613,18 @@ __STYLE_VARS__
           pills.append(el("span", "pill", "当前无在手任务"));
         }
         card.append(pills);
-
-        refs.agentGrid.append(card);
+        container.append(card);
       });
     }
 
-    function renderTasks() {
-      clearNode(refs.taskList);
-      if (!(state.tasks || []).length) {
-        refs.taskList.append(el("div", "empty", "当前没有活跃任务。可以先发起一个明确任务，系统会在这里展示协同过程。"));
+    function renderTasksInto(container, tasks, emptyText, limit = Infinity) {
+      clearNode(container);
+      const items = tasks.slice(0, limit);
+      if (!items.length) {
+        container.append(el("div", "empty", emptyText));
         return;
       }
-
-      state.tasks.forEach((task) => {
+      items.forEach((task) => {
         const card = el("article", `task-card${task.blocked ? " blocked" : ""}`);
         attachOpenTask(card, task.id);
 
@@ -989,7 +1633,7 @@ __STYLE_VARS__
         titleWrap.append(el("div", "task-title", task.title));
         titleWrap.append(el("div", "task-sub", `${task.id} · 当前负责人：${task.currentAgentLabel || task.org || "未知"} · ${task.updatedAgo}`));
         head.append(titleWrap);
-        head.append(el("div", "status-pill status-standby", task.state));
+        head.append(el("div", `status-pill status-${taskTone(task)}`, task.state));
         card.append(head);
 
         const progressTrack = el("div", "progress-track");
@@ -1016,19 +1660,18 @@ __STYLE_VARS__
           route.append(el("span", "route-step", "还没有形成流转路径"));
         }
         card.append(route);
-
-        refs.taskList.append(card);
+        container.append(card);
       });
     }
 
-    function renderEvents() {
-      clearNode(refs.eventFeed);
-      if (!(state.events || []).length) {
-        refs.eventFeed.append(el("div", "empty", "还没有 progress 或 handoff 事件。"));
+    function renderEventsInto(container, events, emptyText, limit = Infinity) {
+      clearNode(container);
+      const items = events.slice(0, limit);
+      if (!items.length) {
+        container.append(el("div", "empty", emptyText));
         return;
       }
-
-      state.events.forEach((event) => {
+      items.forEach((event) => {
         const item = el("article", `event event-${event.type}`);
         if (event.taskId) {
           item.classList.add("click-card");
@@ -1041,7 +1684,6 @@ __STYLE_VARS__
             }
           });
         }
-
         const head = el("div", "event-head");
         const title = el("div");
         title.append(el("div", "event-title", event.headline));
@@ -1052,7 +1694,130 @@ __STYLE_VARS__
         if (event.detail) {
           item.append(el("div", "event-detail", event.detail));
         }
-        refs.eventFeed.append(item);
+        container.append(item);
+      });
+    }
+
+    function renderCommandCards(container, commands, emptyText) {
+      clearNode(container);
+      if (!commands.length) {
+        container.append(el("div", "empty", emptyText));
+        return;
+      }
+      commands.forEach((command) => {
+        const card = el("div", "command-card");
+        card.append(el("div", "deliverable-title", command.label));
+        card.append(el("div", "command-desc", command.description));
+        card.append(el("div", "code-line", command.command));
+        const actions = el("div", "panel-actions");
+        actions.append(makeCopyButton(command.command));
+        card.append(actions);
+        container.append(card);
+      });
+    }
+
+    function renderDeliverables() {
+      clearNode(refs.deliverablesList);
+      const items = filteredDeliverables();
+      if (!items.length) {
+        refs.deliverablesList.append(el("div", "empty", "当前还没有可展示的交付物。任务完成后，产出路径会在这里聚合。"));
+        return;
+      }
+      items.forEach((item) => {
+        const card = el("div", "deliverable-card");
+        const head = el("div", "deliverable-head");
+        const left = el("div");
+        left.append(el("div", "deliverable-title", item.title));
+        left.append(el("div", "list-meta", `${item.id} · ${item.state} · ${item.updatedAgo}`));
+        head.append(left);
+        head.append(el("div", "theme-badge", item.state));
+        card.append(head);
+        card.append(el("div", "command-desc", item.summary || "暂无交付摘要"));
+        if (item.output) {
+          card.append(el("div", "path-line", item.output));
+        }
+        const actions = el("div", "panel-actions");
+        const openTaskButton = el("button", "button secondary", "打开任务回放");
+        openTaskButton.type = "button";
+        openTaskButton.addEventListener("click", () => openDrawer("task", item.id));
+        actions.append(openTaskButton);
+        if (item.output) {
+          actions.append(makeCopyButton(item.output, "复制路径"));
+        }
+        card.append(actions);
+        refs.deliverablesList.append(card);
+      });
+    }
+
+    function renderThemes() {
+      clearNode(refs.currentThemeSummary);
+      clearNode(refs.themeGrid);
+      const currentTheme = (state.themeCatalog || []).find((theme) => theme.current) || null;
+      if (currentTheme) {
+        const summary = el("div", "deliverable-card");
+        summary.append(el("div", "deliverable-title", currentTheme.displayName));
+        summary.append(el("div", "command-desc", currentTheme.summary));
+        summary.append(el("div", "path-line", `适合：${currentTheme.bestFor}`));
+        summary.append(el("div", "path-line", `组织气质：${currentTheme.tagline}`));
+        refs.currentThemeSummary.append(summary);
+      }
+      if (!(state.themeCatalog || []).length) {
+        refs.themeGrid.append(el("div", "empty", "当前没有可用主题目录。"));
+        return;
+      }
+      (state.themeCatalog || []).forEach((theme) => {
+        const card = el("article", "theme-card");
+        card.dataset.current = theme.current ? "true" : "false";
+        const head = el("div", "theme-head");
+        const titleWrap = el("div");
+        titleWrap.append(el("div", "theme-title", theme.displayName));
+        titleWrap.append(el("div", "list-meta", theme.tagline));
+        head.append(titleWrap);
+        head.append(el("div", "theme-badge", theme.current ? "当前主题" : theme.name));
+        card.append(head);
+        card.append(el("div", "command-desc", theme.summary));
+        card.append(el("div", "path-line", `适合场景：${theme.bestFor}`));
+        refs.themeGrid.append(card);
+      });
+    }
+
+    function renderStatusStrip() {
+      clearNode(refs.agentStatusStrip);
+      const counts = { active: 0, waiting: 0, blocked: 0, standby: 0, idle: 0 };
+      filteredAgents().forEach((agent) => {
+        counts[agent.status] = (counts[agent.status] || 0) + 1;
+      });
+      [
+        ["推进中", counts.active, "有明确 progress signal，正在推进任务。"],
+        ["待反馈", counts.waiting, "手里有任务，但最近没有新的推进信号。"],
+        ["阻塞", counts.blocked, "存在阻塞任务，通常需要额外资源或用户判断。"],
+        ["待命", counts.standby, "最近有活动或刚结束一轮接力。"],
+        ["空闲", counts.idle, "当前没有活跃任务，也没有新的工作区信号。"],
+      ].forEach(([label, value, note]) => {
+        const card = el("div", "status-card");
+        card.append(el("span", "", label));
+        card.append(el("strong", "", String(value)));
+        card.append(el("div", "status-note", note));
+        refs.agentStatusStrip.append(card);
+      });
+    }
+
+    function renderTaskFilters() {
+      clearNode(refs.taskFilterRow);
+      [
+        ["active", "活跃任务"],
+        ["blocked", "阻塞任务"],
+        ["done", "已完成"],
+        ["all", "全部任务"],
+      ].forEach(([value, label]) => {
+        const chip = el("button", "filter-chip", label);
+        chip.type = "button";
+        chip.dataset.active = String(taskFilter === value);
+        chip.addEventListener("click", () => {
+          taskFilter = value;
+          renderAll();
+        });
+        refs.taskFilterRow.append(chip);
       });
     }
 
@@ -1061,6 +1826,12 @@ __STYLE_VARS__
       refs.themeName.textContent = state.theme.displayName;
       refs.ownerTitle.textContent = state.ownerTitle;
       refs.installDir.textContent = state.openclawDir;
+      refs.railThemeName.textContent = state.theme.displayName;
+      refs.railOwnerTitle.textContent = state.ownerTitle;
+      refs.railRouterAgent.textContent = state.routerAgentId || "未知";
+      refs.railInstallDir.textContent = state.openclawDir;
+      refs.jsonLink.href = dashboardJsonHref();
+      renderCommandCards(refs.railCommandList, (state.commands || []).slice(0, 2), "暂无快速动作。");
     }
 
     function renderDrawerList(items, emptyText, onClick) {
@@ -1069,7 +1840,6 @@ __STYLE_VARS__
         wrap.append(el("div", "empty", emptyText));
         return wrap;
       }
-
       items.forEach((item) => {
         const box = el("div", "drawer-list-item");
         const head = el("div", "drawer-item-head");
@@ -1114,7 +1884,6 @@ __STYLE_VARS__
         wrap.append(el("div", "empty", "还没有可回放的 handoff 或 progress 事件。"));
         return wrap;
       }
-
       replay.forEach((entry) => {
         const box = el("div", "drawer-flow-item");
         const head = el("div", "drawer-item-head");
@@ -1229,9 +1998,7 @@ __STYLE_VARS__
     }
 
     function syncDrawer() {
-      if (!selection.kind || !selection.id) {
-        return;
-      }
+      if (!selection.kind || !selection.id) return;
       const item = selection.kind === "agent" ? getAgent(selection.id) : getTask(selection.id);
       if (!item) {
         closeDrawer();
@@ -1260,23 +2027,79 @@ __STYLE_VARS__
       refs.scrim.hidden = true;
     }
 
+    function applyViewState() {
+      refs.navLinks.forEach((link) => {
+        link.dataset.active = String(link.dataset.view === currentView);
+      });
+      refs.views.forEach((view) => {
+        view.hidden = view.dataset.view !== currentView;
+      });
+      const meta = VIEW_META[currentView] || VIEW_META.overview;
+      refs.viewTitle.textContent = meta.title;
+      refs.viewSubtitle.textContent = searchQuery ? `${meta.subtitle} 当前筛选：${searchQuery}` : meta.subtitle;
+    }
+
+    function renderOverview() {
+      renderMetrics();
+      renderRelaysInto(refs.overviewRelayGrid, state.relays || [], "最近 24 小时还没有足够的接力记录。");
+      renderAgentsInto(
+        refs.overviewAgentGrid,
+        filteredAgents().filter((agent) => agent.activeTasks || agent.recentSignals.length),
+        "当前没有符合筛选条件的 Agent 现场。",
+        6,
+      );
+      renderTasksInto(
+        refs.overviewTaskList,
+        filteredTasks().filter((task) => task.active),
+        "当前没有符合筛选条件的活跃任务。",
+        6,
+      );
+      renderEventsInto(
+        refs.overviewEventFeed,
+        filteredEvents(),
+        "还没有匹配的事件时间线。",
+        10,
+      );
+    }
+
+    function renderAgentsView() {
+      renderStatusStrip();
+      renderAgentsInto(refs.agentsPageGrid, filteredAgents(), "当前没有匹配的 Agent。");
+    }
+
+    function renderTasksView() {
+      renderTaskFilters();
+      renderTasksInto(refs.tasksPageList, filteredTasks(), "当前没有匹配的任务。");
+      renderDeliverables();
+      renderCommandCards(refs.taskCommandList, state.commands || [], "当前没有可用命令。");
+    }
+
+    function renderActivityView() {
+      renderRelaysInto(refs.activityRelayGrid, state.relays || [], "最近 24 小时还没有形成 handoff 网络。");
+      renderEventsInto(refs.activityEventFeed, filteredEvents(), "当前没有匹配的活动事件。");
+    }
+
+    function renderThemesView() {
+      renderThemes();
+      renderCommandCards(refs.themeCommandList, state.commands || [], "当前没有主题相关命令。");
+    }
+
     function renderAll() {
       renderMeta();
-      renderMetrics();
-      renderRelays();
-      renderAgents();
-      renderTasks();
-      renderEvents();
+      applyViewState();
+      renderOverview();
+      renderAgentsView();
+      renderTasksView();
+      renderActivityView();
+      renderThemesView();
       syncDrawer();
     }
 
     async function fetchLatestDashboard(reason = "manual") {
-      if (!supportsHttp || paused || fetchInFlight) {
-        return;
-      }
+      if (!supportsHttp || paused || fetchInFlight) return;
       fetchInFlight = true;
       try {
-        const response = await fetch(`./api/dashboard?_=${Date.now()}`, { cache: "no-store" });
+        const response = await fetch(`${dashboardApiHref()}?_=${Date.now()}`, { cache: "no-store" });
         if (!response.ok) {
           throw new Error(`HTTP ${response.status}`);
         }
@@ -1303,9 +2126,7 @@ __STYLE_VARS__
     }
 
     function connectLive() {
-      if (!supportsHttp || paused) {
-        return;
-      }
+      if (!supportsHttp || paused) return;
       if (!window.EventSource) {
         connectionMode = "snapshot";
         return;
@@ -1313,7 +2134,7 @@ __STYLE_VARS__
       disconnectLive();
       connectionMode = "connecting";
       setLiveStatus("正在建立实时连接...", "warn");
-      eventSource = new EventSource("./events");
+      eventSource = new EventSource(dashboardEventsHref());
       eventSource.addEventListener("dashboard", async () => {
         await fetchLatestDashboard("stream");
       });
@@ -1322,15 +2143,20 @@ __STYLE_VARS__
         lastSyncAt = Date.now();
       };
       eventSource.onerror = () => {
-        if (paused) {
-          return;
-        }
+        if (paused) return;
         connectionMode = "degraded";
         disconnectLive();
         reconnectTimer = setTimeout(() => connectLive(), 4000);
       };
     }
 
+    refs.navLinks.forEach((link) => {
+      link.addEventListener("click", () => navigate(link.dataset.view));
+    });
+    refs.globalSearch.addEventListener("input", (event) => {
+      searchQuery = event.target.value.trim();
+      renderAll();
+    });
     refs.refreshNow.addEventListener("click", async () => {
       if (supportsHttp) {
         await fetchLatestDashboard("manual");
@@ -1338,7 +2164,6 @@ __STYLE_VARS__
         location.reload();
       }
     });
-
     refs.toggleRefresh.addEventListener("click", async () => {
       paused = !paused;
       refs.toggleRefresh.textContent = paused ? "恢复实时刷新" : "暂停实时刷新";
@@ -1350,19 +2175,27 @@ __STYLE_VARS__
         connectLive();
       }
     });
-
     refs.scrim.addEventListener("click", closeDrawer);
     refs.drawerClose.addEventListener("click", closeDrawer);
+
     window.addEventListener("keydown", (event) => {
       if (event.key === "Escape") {
         closeDrawer();
       }
     });
+    window.addEventListener("popstate", () => {
+      currentView = getViewFromLocation();
+      renderAll();
+    });
+    window.addEventListener("hashchange", () => {
+      if (!supportsHttp) {
+        currentView = getViewFromLocation();
+        renderAll();
+      }
+    });
 
     setInterval(() => {
-      if (paused) {
-        return;
-      }
+      if (paused) return;
       if (!supportsHttp) {
         setLiveStatus("当前是本地快照模式", "idle");
         return;
@@ -1374,8 +2207,6 @@ __STYLE_VARS__
         setLiveStatus("正在建立实时连接...", "warn");
       } else if (connectionMode === "degraded") {
         setLiveStatus(`连接中断，正在重连 · 最近同步 ${ageSeconds} 秒前`, "warn");
-      } else if (connectionMode === "paused") {
-        setLiveStatus("实时刷新已暂停", "paused");
       } else {
         setLiveStatus(`快照模式 · 最近同步 ${ageSeconds} 秒前`, "idle");
       }
@@ -1688,6 +2519,7 @@ def build_dashboard_data(openclaw_dir):
     global_events = []
     task_index = []
     active_tasks = []
+    deliverables = []
 
     recent_threshold = now - timedelta(hours=24)
 
@@ -1715,6 +2547,7 @@ def build_dashboard_data(openclaw_dir):
             "currentUpdate": task.get("now") or task.get("currentUpdate") or "",
             "updatedAt": task.get("updatedAt", ""),
             "updatedAgo": format_age(parse_iso(task.get("updatedAt")), now),
+            "output": task.get("output", ""),
             "todo": todo,
             "todoItems": todo_items,
             "route": task_route(task),
@@ -1723,6 +2556,19 @@ def build_dashboard_data(openclaw_dir):
             "replay": list(reversed(replay[-24:])),
         }
         task_index.append(task_record)
+        if state in TERMINAL_STATES or task.get("output"):
+            deliverables.append(
+                {
+                    "id": task_record["id"],
+                    "title": task_record["title"],
+                    "state": task_record["state"],
+                    "owner": task_record["owner"],
+                    "updatedAt": task_record["updatedAt"],
+                    "updatedAgo": task_record["updatedAgo"],
+                    "summary": task_record["currentUpdate"],
+                    "output": task_record["output"],
+                }
+            )
 
         if current_agent and task_record["active"]:
             task_counts_by_agent[current_agent] += 1
@@ -1802,6 +2648,10 @@ def build_dashboard_data(openclaw_dir):
         key=lambda item: parse_iso(item.get("at")) or datetime.fromtimestamp(0, tz=timezone.utc),
         reverse=True,
     )
+    deliverables.sort(
+        key=lambda item: parse_iso(item.get("updatedAt")) or datetime.fromtimestamp(0, tz=timezone.utc),
+        reverse=True,
+    )
 
     agent_cards = []
     active_agent_count = 0
@@ -1876,22 +2726,55 @@ def build_dashboard_data(openclaw_dir):
         for event in global_events
         if parse_iso(event.get("at")) and parse_iso(event.get("at")) >= now - timedelta(hours=1)
     )
+    theme_catalog = []
+    for theme_key, meta in THEME_CATALOG.items():
+        theme_catalog.append(
+            {
+                "name": theme_key,
+                "displayName": meta["displayName"],
+                "tagline": meta["tagline"],
+                "bestFor": meta["bestFor"],
+                "summary": meta["summary"],
+                "current": theme_key == theme_name,
+            }
+        )
+    product_commands = [
+        {
+            "label": "打开实时面板",
+            "command": f"python3 {openclaw_dir}/workspace-{router_agent_id}/scripts/collaboration_dashboard.py --serve --dir {openclaw_dir}",
+            "description": "启动完整 Mission Control 本地应用。",
+        },
+        {
+            "label": "查看健康状态",
+            "command": f"python3 {openclaw_dir}/workspace-{router_agent_id}/scripts/health_dashboard.py --dir {openclaw_dir}",
+            "description": "快速检查各 Agent 工作区和任务状态。",
+        },
+        {
+            "label": "导出当前快照",
+            "command": f"python3 {openclaw_dir}/workspace-{router_agent_id}/scripts/collaboration_dashboard.py --dir {openclaw_dir}",
+            "description": "生成最新 HTML 和 JSON 快照。",
+        },
+    ]
 
     return {
         "generatedAt": now.isoformat().replace("+00:00", "Z"),
         "generatedAgo": "刚刚",
         "openclawDir": str(openclaw_dir),
+        "routerAgentId": router_agent_id,
         "theme": {
             "name": theme_name,
             "displayName": config.get("sanshengLiubu", {}).get("displayName", theme_name),
             "styles": theme_style,
         },
+        "themeCatalog": theme_catalog,
         "ownerTitle": kanban_cfg.get("owner_title", "用户"),
         "agents": agent_cards,
         "tasks": active_tasks[:24],
         "taskIndex": task_index[:72],
+        "deliverables": deliverables[:24],
         "events": global_events[:42],
         "relays": relays,
+        "commands": product_commands,
         "metrics": {
             "activeTasks": len(active_tasks),
             "activeAgents": active_agent_count,
@@ -1969,7 +2852,7 @@ def build_dashboard_bundle(openclaw_dir, output_dir=None):
 
 
 class CollaborationDashboardHandler(BaseHTTPRequestHandler):
-    server_version = "SanshengDashboard/1.5"
+    server_version = "SanshengDashboard/1.6"
 
     def log_message(self, format, *args):
         return
@@ -1987,13 +2870,38 @@ class CollaborationDashboardHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         path = self.path.split("?", 1)[0]
-        if path in ("/", "/collaboration-dashboard.html"):
+        if path in ("/", "/overview", "/agents", "/tasks", "/activity", "/themes", "/collaboration-dashboard.html"):
             data, _paths = self._bundle()
             self._send_bytes(render_html(data).encode("utf-8"), "text/html; charset=utf-8")
             return
         if path in ("/api/dashboard", "/collaboration-dashboard.json"):
             data, _paths = self._bundle()
             body = (json.dumps(data, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+            self._send_bytes(body, "application/json; charset=utf-8")
+            return
+        if path == "/api/agents":
+            data, _paths = self._bundle()
+            body = (json.dumps({"agents": data.get("agents", [])}, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+            self._send_bytes(body, "application/json; charset=utf-8")
+            return
+        if path == "/api/tasks":
+            data, _paths = self._bundle()
+            body = (json.dumps({"tasks": data.get("taskIndex", [])}, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+            self._send_bytes(body, "application/json; charset=utf-8")
+            return
+        if path == "/api/events":
+            data, _paths = self._bundle()
+            body = (json.dumps({"events": data.get("events", [])}, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+            self._send_bytes(body, "application/json; charset=utf-8")
+            return
+        if path == "/api/themes":
+            data, _paths = self._bundle()
+            body = (json.dumps({"theme": data.get("theme", {}), "themeCatalog": data.get("themeCatalog", [])}, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+            self._send_bytes(body, "application/json; charset=utf-8")
+            return
+        if path == "/api/deliverables":
+            data, _paths = self._bundle()
+            body = (json.dumps({"deliverables": data.get("deliverables", [])}, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
             self._send_bytes(body, "application/json; charset=utf-8")
             return
         if path == "/events":

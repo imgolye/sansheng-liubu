@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.6.0 - 2026-03-14
+
+### Added
+- Added a product-style Mission Control app shell with dedicated Overview, Agents, Tasks, Activity, and Themes modules.
+- Added local API endpoints for agents, tasks, events, themes, and deliverables so the dashboard can act as a real product surface instead of a single visual page.
+- Added integrated product runbook cards that expose common local commands directly inside the app.
+
+### Changed
+- Reframed `collaboration_dashboard.py --serve` as a local multi-view application with navigation, search, deep-linkable routes, and dedicated work areas for operations and delivery.
+- Expanded dashboard payloads with theme catalog, router context, command palette data, and deliverables inventory to support richer product workflows.
+
+### Fixed
+- Kept browser console output clean across the new multi-route app experience.
+- Preserved drawer-based drill-downs while expanding the app beyond a single-page overview.
+
 ## 1.5.0 - 2026-03-14
 
 ### Added

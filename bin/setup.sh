@@ -6,7 +6,7 @@ set -euo pipefail
 #  用法: bash setup.sh [--theme imperial|corporate|startup]
 # ============================================================
 
-VERSION="1.2.0"
+VERSION="1.3.0"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 TEMPLATES_DIR="$PROJECT_DIR/templates"
@@ -175,6 +175,7 @@ for agent in "${ALL_AGENTS[@]}"; do
   cp "$TEMPLATES_DIR/scripts/file_lock.py" "$OPENCLAW_DIR/workspace-$agent/scripts/"
   cp "$TEMPLATES_DIR/scripts/refresh_live_data.py" "$OPENCLAW_DIR/workspace-$agent/scripts/"
   cp "$TEMPLATES_DIR/scripts/health_dashboard.py" "$OPENCLAW_DIR/workspace-$agent/scripts/"
+  cp "$TEMPLATES_DIR/scripts/collaboration_dashboard.py" "$OPENCLAW_DIR/workspace-$agent/scripts/"
 done
 info "看板脚本已部署到所有 workspace"
 
@@ -228,6 +229,9 @@ for agent in "${ALL_AGENTS[@]}"; do
   fi
 done
 info "看板数据已初始化"
+
+python3 "$OPENCLAW_DIR/workspace-${ALL_AGENTS[0]}/scripts/collaboration_dashboard.py" --quiet || true
+info "协同态势看板已生成"
 
 # ---------- 权限加固 ----------
 chmod 600 "$OPENCLAW_DIR/openclaw.json"

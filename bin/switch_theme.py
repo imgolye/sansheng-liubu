@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import subprocess
 import shutil
 from copy import deepcopy
 from datetime import datetime, timezone
@@ -33,6 +34,7 @@ RUNTIME_SCRIPTS = (
     "file_lock.py",
     "refresh_live_data.py",
     "health_dashboard.py",
+    "collaboration_dashboard.py",
 )
 GENERATED_ROOT_FILES = {"SOUL.md", "HEARTBEAT.md"}
 GENERATED_DIRS = {"scripts", "shared-context"}
@@ -280,6 +282,10 @@ def main():
 
     generate_args = build_generate_args(openclaw_dir, theme_file, existing_config, args.task_prefix)
     write_config(new_theme, generate_args, existing_config=existing_config)
+
+    dashboard_script = openclaw_dir / f"workspace-{get_agent_id_map_by_semantic(new_theme)['router']}" / "scripts" / "collaboration_dashboard.py"
+    if dashboard_script.exists():
+        subprocess.run(["python3", str(dashboard_script), "--quiet"], check=False)
 
     print(
         f"Switched theme: {current_theme_name or 'unknown'} -> {new_theme['name']} "

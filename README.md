@@ -4,19 +4,19 @@
 
 一键部署 11 个协作 AI Agent，模拟组织架构处理复杂任务。
 
-## 1.2.0 亮点
+## 1.3.0 亮点
 
-现在支持在已安装环境里直接切换主题，无需重装：
+现在不只是能跑多 Agent，还能让用户看到协同正在发生：
 
 ```bash
-bash bin/switch_theme.sh --theme startup
+python3 ~/.openclaw/workspace-your-router-id/scripts/collaboration_dashboard.py --serve
 ```
 
-切换时会自动：
-- 备份当前配置
-- 保留现有频道、模型和网关 token
-- 迁移任务看板、会话目录和 workspace 产物
-- 重生成新主题的 `SOUL.md` 与 `openclaw.json`
+这一版新增：
+- 协同态势看板：看到谁在执行、谁在等待、任务如何接力
+- HTML + JSON 双输出：适合浏览器查看，也适合后续接系统面板
+- 运行中切换主题：`bash bin/switch_theme.sh --theme startup`
+- 自动迁移：保留现有频道、模型、网关 token、任务板和 workspace 产物
 
 ## 架构
 
@@ -131,6 +131,20 @@ python3 ~/.openclaw/workspace-${ROUTER_ID}/scripts/health_dashboard.py
   无活跃任务
 ```
 
+如果你想看到“每个 Agent 正在干什么、最近怎么接力”，可以打开协同态势看板：
+
+```bash
+python3 ~/.openclaw/workspace-${ROUTER_ID}/scripts/collaboration_dashboard.py
+python3 ~/.openclaw/workspace-${ROUTER_ID}/scripts/collaboration_dashboard.py --serve
+```
+
+生成结果默认在：
+
+```text
+~/.openclaw/dashboard/collaboration-dashboard.html
+~/.openclaw/dashboard/collaboration-dashboard.json
+```
+
 ### 5. 首次使用建议
 
 - 先发一条简单消息，确认路由 Agent 能正常接收并回复
@@ -181,6 +195,7 @@ bash bin/switch_theme.sh --theme corporate --task-prefix TASK
 - **任务分级 S/A/B**：重大任务走审议流程，简单任务直达执行
 - **串联/并行调度**：支持 工程→测试→部署 链式执行
 - **实时看板**：全程进度可视，每个 Agent 主动上报状态
+- **协同态势视图**：直接看到谁在执行、谁在等待、任务如何接力流转
 - **异常升级**：阻塞自动逐级上报
 - **安全加固**：secrets 环境变量化、per-agent 沙箱、工具白名单
 - **多语言支持**：主题配置 `language: "en"` 自动生成英文 SOUL.md 和看板标签

@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.3.0 - 2026-03-14
+
+### Added
+- Added `templates/scripts/collaboration_dashboard.py` to generate an HTML + JSON mission-control view for live multi-agent collaboration.
+- Added automatic collaboration dashboard generation during install, task refresh, and theme switching.
+
+### Changed
+- Updated the README to surface the collaboration dashboard and visual coordination workflow.
+- Extended installation validation to require the collaboration dashboard runtime script.
+
+### Fixed
+- Ensured theme switching preserves the visual dashboard capability after agent/workspace migrations.
+
 ## 1.2.0 - 2026-03-14
 
 ### Added

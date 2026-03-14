@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.17.0 - 2026-03-14
+
+### Added
+- Added broader frontend internationalization coverage for the high-frequency Mission Control workspaces, including Tasks, Conversations, Themes, Skills, and OpenClaw views.
+- Added a mobile-friendly task workspace mode with responsive card layouts so the local product remains usable on phone-sized screens.
+- Added a PWA shell for the separated frontend, including `manifest.webmanifest`, service-worker registration, installable metadata, and offline static-asset caching.
+- Added API integration tests plus Playwright end-to-end coverage for login, overview analytics, mobile task rendering, and PWA surface checks.
+
+### Changed
+- Tightened the React frontend delivery baseline by syncing the new PWA assets and test harness into the runtime/tooling flow.
+- Rebalanced Vite manual chunking so the commercial frontend no longer emits the previous `>500 kB` production bundle warning while preserving route-level lazy loading.
+- Updated setup/runtime version metadata to `1.17.0`.
+
 ## 1.16.0 - 2026-03-14
 
 ### Added

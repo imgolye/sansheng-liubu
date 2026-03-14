@@ -4,15 +4,20 @@
 
 一键部署 11 个协作 AI Agent，模拟组织架构处理复杂任务。
 
-## 1.16.0 亮点
+## 1.17.0 亮点
 
-现在不只是一个“本地操作台”，而是已经拆成真正的前后端分离产品：
+现在不只是一个“本地操作台”，而是更接近可交付的本地商业产品：
 
 ```bash
 python3 ~/.openclaw/workspace-your-router-id/scripts/collaboration_dashboard.py --serve
 ```
 
 这一版新增：
+- 高频工作区双语：`Tasks`、`Conversations`、`Themes`、`Skills`、`OpenClaw` 已支持中英切换，并跟随主题语言偏好
+- 移动端交付台：`Tasks` 在窄屏下会自动切到卡片工作台，手机上也能直接看任务和打开详情
+- PWA 产品壳：新增 `manifest`、`service worker` 和可安装元数据，本地产品可以作为桌面/移动 Web App 使用
+- 自动化测试基线：补了 API 集成测试和前端 Playwright E2E，开始覆盖登录、总览、移动端任务和 PWA 入口
+- 前端交付优化：重新整理 `vite` 分块，生产构建已经消除 `>500 kB` 主包告警
 - 前后端分离：Mission Control 现在由 API-first Python 后端 + `frontend/` React + Ant Design 前端组成
 - SPA 路由：`/login`、`/overview`、`/agents`、`/tasks`、`/conversations`、`/activity`、`/themes`、`/skills`、`/openclaw`、`/admin`
 - JSON 登录：新增 `/api/auth/session`、`/api/auth/login`、`/api/auth/logout`

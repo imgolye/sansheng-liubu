@@ -13,6 +13,10 @@ export default defineConfig({
             return;
           }
 
+          if (id.includes("/recharts/") || id.includes("/victory-vendor/")) {
+            return "charts";
+          }
+
           if (
             id.includes("/react/") ||
             id.includes("/react-dom/") ||
@@ -21,8 +25,25 @@ export default defineConfig({
             return "react";
           }
 
+          if (id.includes("/antd/locale/") || id.includes("/dayjs/")) {
+            return "antd-locales";
+          }
+
+          if (
+            id.includes("/@ant-design/cssinjs/") ||
+            id.includes("/rc-util/") ||
+            id.includes("/@rc-component/") ||
+            id.includes("/rc-motion/")
+          ) {
+            return "antd-core";
+          }
+
           if (id.includes("/@ant-design/icons/")) {
-            return;
+            return "antd-icons";
+          }
+
+          if (id.includes("/@babel/runtime/")) {
+            return "runtime";
           }
         },
       },

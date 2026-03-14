@@ -189,6 +189,10 @@ function App() {
   }, [localePreference]);
 
   useEffect(() => {
+    document.documentElement.lang = localeKey === "en" ? "en" : "zh-CN";
+  }, [localeKey]);
+
+  useEffect(() => {
     function handleOnline() {
       setIsOffline(false);
     }

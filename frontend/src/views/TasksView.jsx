@@ -1,41 +1,122 @@
-import { Button, Card, List, Space, Table } from "antd";
+import { useEffect, useState } from "react";
+import { Button, Card, Grid, List, Segmented, Space, Table, Tag, Typography } from "antd";
 import { PlusOutlined } from "@ant-design/icons";
 import { formatListText, safeArray, statusTag } from "../ui.jsx";
 
-function TasksView({ permissions, tasks, dashboard, onOpenCreateTask, onSelectTask }) {
+const { Text, Paragraph } = Typography;
+const { useBreakpoint } = Grid;
+
+function taskPreview(task, t) {
+  return formatListText([
+    task.currentAgentLabel || "",
+    task.updatedAgo || "",
+    task.owner || "",
+  ]) || t("tasks.noProgress");
+}
+
+function TasksView({ permissions, tasks, dashboard, onOpenCreateTask, onSelectTask, t }) {
+  const screens = useBreakpoint();
+  const isCompact = !screens.lg;
+  const [mode, setMode] = useState(isCompact ? "cards" : "table");
+
+  useEffect(() => {
+    setMode(isCompact ? "cards" : "table");
+  }, [isCompact]);
+
   return (
     <Space direction="vertical" size={16} style={{ width: "100%" }}>
       <Card
-        title="交付执行台"
+        title={t("tasks.title")}
         extra={
-          permissions.taskWrite ? (
-            <Button type="primary" icon={<PlusOutlined />} onClick={onOpenCreateTask}>
-              创建任务
-            </Button>
-          ) : null
+          <Space>
+            <Text type="secondary">{t("tasks.modeHint")}</Text>
+            <Segmented
+              size="small"
+              value={mode}
+              onChange={(value) => setMode(String(value))}
+              options={[
+                { value: "table", label: t("tasks.table") },
+                { value: "cards", label: t("tasks.cards") },
+              ]}
+            />
+            {permissions.taskWrite ? (
+              <Button type="primary" icon={<PlusOutlined />} onClick={onOpenCreateTask}>
+                {t("tasks.create")}
+              </Button>
+            ) : null}
+          </Space>
         }
+        className="workspace-card"
       >
-        <Table
-          rowKey="id"
-          dataSource={tasks}
-          onRow={(record) => ({
-            onClick: () => onSelectTask(record.id),
-          })}
-          columns={[
-            { title: "任务号", dataIndex: "id", width: 180 },
-            { title: "标题", dataIndex: "title", ellipsis: true },
-            { title: "状态", dataIndex: "state", width: 120, render: (value) => statusTag(value) },
-            { title: "负责人", dataIndex: "currentAgentLabel", width: 160, ellipsis: true },
-            { title: "签收", dataIndex: "owner", width: 140, ellipsis: true },
-            { title: "更新时间", dataIndex: "updatedAgo", width: 120 },
-          ]}
-        />
+        {mode === "table" ? (
+          <Table
+            rowKey="id"
+            dataSource={tasks}
+            locale={{ emptyText: t("tasks.emptyTasks") }}
+            onRow={(record) => ({
+              onClick: () => onSelectTask(record.id),
+            })}
+            columns={[
+              { title: t("tasks.columns.id"), dataIndex: "id", width: 180 },
+              { title: t("tasks.columns.title"), dataIndex: "title", ellipsis: true },
+              { title: t("tasks.columns.state"), dataIndex: "state", width: 120, render: (value) => statusTag(value) },
+              { title: t("tasks.columns.owner"), dataIndex: "currentAgentLabel", width: 160, ellipsis: true },
+              { title: t("tasks.columns.official"), dataIndex: "owner", width: 140, ellipsis: true },
+              { title: t("tasks.columns.updated"), dataIndex: "updatedAgo", width: 120 },
+            ]}
+          />
+        ) : (
+          <List
+            grid={{ gutter: 16, xs: 1, md: 2 }}
+            dataSource={tasks}
+            locale={{ emptyText: t("tasks.emptyTasks") }}
+            renderItem={(item) => (
+              <List.Item>
+                <button type="button" className="task-card-button" onClick={() => onSelectTask(item.id)}>
+                  <Card className="task-card-shell" bordered={false}>
+                    <Space direction="vertical" size={12} style={{ width: "100%" }}>
+                      <Space wrap size={8}>
+                        <Tag color="processing">{item.id}</Tag>
+                        {statusTag(item.state)}
+                      </Space>
+                      <div>
+                        <Text strong>{item.title || t("tasks.untitled")}</Text>
+                        <Paragraph type="secondary" className="task-card-meta">
+                          {taskPreview(item, t)}
+                        </Paragraph>
+                      </div>
+                      <div className="task-card-grid">
+                        <div>
+                          <Text type="secondary">{t("tasks.currentOwner")}</Text>
+                          <Text>{item.currentAgentLabel || "-"}</Text>
+                        </div>
+                        <div>
+                          <Text type="secondary">{t("tasks.ownerSignoff")}</Text>
+                          <Text>{item.owner || "-"}</Text>
+                        </div>
+                        <div>
+                          <Text type="secondary">{t("tasks.updatedLabel")}</Text>
+                          <Text>{item.updatedAgo || "-"}</Text>
+                        </div>
+                        <div>
+                          <Text type="secondary">{t("tasks.lastProgress")}</Text>
+                          <Text>{item.progress || t("tasks.noProgress")}</Text>
+                        </div>
+                      </div>
+                      <Text className="task-card-cta">{t("tasks.openTask")}</Text>
+                    </Space>
+                  </Card>
+                </button>
+              </List.Item>
+            )}
+          />
+        )}
       </Card>
 
-      <Card title="交付物">
+      <Card title={t("tasks.deliverables")} className="workspace-card">
         <List
           dataSource={safeArray(dashboard.deliverables)}
-          locale={{ emptyText: "当前还没有已归档交付物。" }}
+          locale={{ emptyText: t("tasks.emptyDeliverables") }}
           renderItem={(item) => (
             <List.Item>
               <List.Item.Meta

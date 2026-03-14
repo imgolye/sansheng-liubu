@@ -15,15 +15,16 @@ function ConversationsView({
   dashboard,
   onOpenConversation,
   onSendConversation,
+  t,
 }) {
   return (
     <Row gutter={[16, 16]}>
       <Col xs={24} xl={10}>
-        <Card title="会话列表" extra={<Text type="secondary">{sessions.length} 个真实会话</Text>}>
+        <Card title={t("conversations.listTitle")} extra={<Text type="secondary">{sessions.length} {t("conversations.realSessions")}</Text>} className="workspace-card">
           <List
             itemLayout="vertical"
             dataSource={sessions}
-            locale={{ emptyText: "当前没有会话。" }}
+            locale={{ emptyText: t("conversations.emptySessions") }}
             renderItem={(item) => (
               <List.Item
                 className={item.key === selectedConversationKey ? "selectable-item active" : "selectable-item"}
@@ -33,12 +34,12 @@ function ConversationsView({
                   title={
                     <Space>
                       <Text strong>{item.label}</Text>
-                      {item.talkable ? <Tag color="green">可对话</Tag> : <Tag>只读</Tag>}
+                      {item.talkable ? <Tag color="green">{t("conversations.talkable")}</Tag> : <Tag>{t("conversations.readonly")}</Tag>}
                     </Space>
                   }
                   description={formatListText([item.agentLabel, item.sourceLabel, item.updatedAgo])}
                 />
-                <Text type="secondary">{item.preview || "当前没有摘要。"}</Text>
+                <Text type="secondary">{item.preview || t("conversations.noPreview")}</Text>
               </List.Item>
             )}
           />
@@ -47,36 +48,36 @@ function ConversationsView({
 
       <Col xs={24} xl={14}>
         <Space direction="vertical" size={16} style={{ width: "100%" }}>
-          <Card title="对话现场" extra={selectedConversation ? <Tag color="processing">{selectedConversation.agentLabel}</Tag> : null}>
+          <Card title={t("conversations.sceneTitle")} extra={selectedConversation ? <Tag color="processing">{selectedConversation.agentLabel}</Tag> : null} className="workspace-card">
             {transcriptLoading ? (
-              <Empty description="正在载入 transcript" />
+              <Empty description={t("conversations.loadingTranscript")} />
             ) : transcript ? (
               <Space direction="vertical" size={12} style={{ width: "100%" }}>
                 <Descriptions size="small" column={2}>
                   <Descriptions.Item label="Agent">{selectedConversation?.agentLabel}</Descriptions.Item>
-                  <Descriptions.Item label="模型">{transcript?.meta?.model || selectedConversation?.model || "unknown"}</Descriptions.Item>
-                  <Descriptions.Item label="轮次">{transcript?.stats?.turns || 0}</Descriptions.Item>
-                  <Descriptions.Item label="工具消息">{transcript?.stats?.toolMessages || 0}</Descriptions.Item>
+                  <Descriptions.Item label={t("conversations.model")}>{transcript?.meta?.model || selectedConversation?.model || "unknown"}</Descriptions.Item>
+                  <Descriptions.Item label={t("conversations.turns")}>{transcript?.stats?.turns || 0}</Descriptions.Item>
+                  <Descriptions.Item label={t("conversations.toolMessages")}>{transcript?.stats?.toolMessages || 0}</Descriptions.Item>
                 </Descriptions>
                 <List
                   dataSource={safeArray(transcript.items)}
-                  locale={{ emptyText: "该会话还没有 transcript。" }}
+                  locale={{ emptyText: t("conversations.emptyTranscript") }}
                   renderItem={(item) => (
                     <List.Item>
                       <List.Item.Meta
                         title={formatListText([item.title, item.at])}
-                        description={<div className="transcript-bubble">{item.text || " "}</div>}
+                        description={<div className="transcript-bubble">{item.text || t("conversations.noText")}</div>}
                       />
                     </List.Item>
                   )}
                 />
               </Space>
             ) : (
-              <Empty description="先从左侧选中一条真实会话" />
+              <Empty description={t("conversations.emptyTranscriptSelection")} />
             )}
           </Card>
 
-          <Card title="继续对话">
+          <Card title={t("conversations.continueTitle")} className="workspace-card">
             {permissions.conversationWrite ? (
               <Form
                 layout="vertical"
@@ -87,7 +88,7 @@ function ConversationsView({
                   thinking: "low",
                 }}
               >
-                <Form.Item label="目标 Agent" name="agentId" rules={[{ required: true, message: "请选择 Agent" }]}>
+                <Form.Item label={t("conversations.targetAgent")} name="agentId" rules={[{ required: true, message: t("conversations.chooseAgent") }]}>
                   <Select
                     options={safeArray(dashboard.agents).map((agent) => ({
                       value: agent.id,
@@ -95,7 +96,7 @@ function ConversationsView({
                     }))}
                   />
                 </Form.Item>
-                <Form.Item label="Thinking" name="thinking">
+                <Form.Item label={t("conversations.thinking")} name="thinking">
                   <Select
                     options={["off", "minimal", "low", "medium", "high"].map((value) => ({
                       value,
@@ -103,15 +104,15 @@ function ConversationsView({
                     }))}
                   />
                 </Form.Item>
-                <Form.Item label="消息内容" name="message" rules={[{ required: true, message: "请输入消息" }]}>
-                  <TextArea rows={5} placeholder="例如：请告诉我今天尚书省还没收口的事项和下一步建议。" />
+                <Form.Item label={t("conversations.message")} name="message" rules={[{ required: true, message: t("conversations.enterMessage") }]}>
+                  <TextArea rows={5} placeholder={t("conversations.messagePlaceholder")} />
                 </Form.Item>
                 <Button type="primary" icon={<MessageOutlined />} htmlType="submit">
-                  发送消息
+                  {t("conversations.send")}
                 </Button>
               </Form>
             ) : (
-              <Alert type="info" showIcon message="当前账号只有查看 transcript 的权限。" />
+              <Alert type="info" showIcon message={t("conversations.transcriptOnly")} />
             )}
           </Card>
         </Space>

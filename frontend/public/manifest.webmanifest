@@ -1,0 +1,17 @@
+{
+  "name": "Sansheng Mission Control",
+  "short_name": "Mission Control",
+  "description": "Commercial multi-agent control plane for OpenClaw operations, delivery, and conversations.",
+  "start_url": "/overview",
+  "display": "standalone",
+  "background_color": "#f3efe8",
+  "theme_color": "#b34722",
+  "icons": [
+    {
+      "src": "/app-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

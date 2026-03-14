@@ -466,6 +466,54 @@ body {
   color: color-mix(in srgb, var(--ink) 82%, var(--accent-deep));
 }
 
+.task-card-button {
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.task-card-shell.ant-card {
+  border-radius: 22px;
+  background: linear-gradient(180deg, rgba(255, 252, 248, 0.98), rgba(247, 238, 228, 0.92));
+  border: 1px solid rgba(181, 90, 42, 0.14);
+  box-shadow: 0 16px 36px rgba(77, 46, 26, 0.08);
+  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+}
+
+.task-card-button:hover .task-card-shell,
+.task-card-button:focus-visible .task-card-shell {
+  transform: translateY(-2px);
+  border-color: rgba(181, 90, 42, 0.24);
+  box-shadow: 0 20px 44px rgba(77, 46, 26, 0.12);
+}
+
+.task-card-button:focus-visible {
+  outline: none;
+}
+
+.task-card-meta.ant-typography {
+  margin: 8px 0 0;
+}
+
+.task-card-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.task-card-grid .ant-typography {
+  display: block;
+  margin-bottom: 0;
+}
+
+.task-card-cta {
+  color: var(--accent-deep);
+  font-weight: 600;
+}
+
 .selectable-item {
   cursor: pointer;
   border-radius: 12px;
@@ -543,5 +591,9 @@ body {
 
   .agent-card-head {
     flex-direction: column;
+  }
+
+  .task-card-grid {
+    grid-template-columns: 1fr;
   }
 }

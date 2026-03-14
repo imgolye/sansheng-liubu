@@ -6,3 +6,5 @@ __pycache__/
 *.lock
 *.tmp
 dist/
+frontend/test-results/
+frontend/playwright-report/

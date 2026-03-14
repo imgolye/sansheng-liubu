@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.15.0 - 2026-03-14
+
+### Added
+- Added a managed installation registry to the Mission Control product kernel so one local control plane can track multiple OpenClaw installs.
+- Added an installation fleet workspace inside `/admin`, including instance cards, local-path registration, and stale-instance removal actions for Owners.
+- Added installation-registry coverage to `tests/test_dashboard_store.py`, extending the automated baseline from users/audit into multi-instance product state.
+
+### Changed
+- Expanded the commercial admin workspace from “seat governance” into the first multi-install control plane, with per-instance theme, router, task-count, and status visibility.
+- Promoted the current install to auto-register itself into the fleet registry so the product can always reason about “current instance vs. other managed instances”.
+
 ## 1.14.0 - 2026-03-14
 
 ### Added

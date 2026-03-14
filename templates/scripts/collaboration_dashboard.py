@@ -22,15 +22,18 @@ from urllib.parse import parse_qs, quote, urlsplit
 
 from dashboard_store import (
     append_audit_event as store_append_audit_event,
+    delete_product_installation as store_delete_product_installation,
     load_audit_events as store_load_audit_events,
+    load_product_installations as store_load_product_installations,
     load_product_users as store_load_product_users,
     save_product_users as store_save_product_users,
     store_path as dashboard_store_path,
+    upsert_product_installation as store_upsert_product_installation,
 )
 
 
 TERMINAL_STATES = {"done", "cancelled", "canceled"}
-PRODUCT_VERSION = "1.14.0"
+PRODUCT_VERSION = "1.15.0"
 OPENCLAW_BASELINE_RELEASE = "2026.3.12"
 PASSWORD_HASH_ITERATIONS = 260000
 USER_ROLES = {
@@ -2238,6 +2241,28 @@ __STYLE_VARS__
             <section class="panel">
               <div class="panel-head">
                 <div>
+                  <h2 class="panel-title">安装舰队</h2>
+                  <p class="panel-subtitle">把多套 OpenClaw 安装实例登记到同一个本地控制平面里，先看清“现在手上到底有几套系统在跑”。</p>
+                </div>
+              </div>
+              <div class="deliverable-list" id="admin-instance-list"></div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-head">
+                <div>
+                  <h2 class="panel-title">登记实例</h2>
+                  <p class="panel-subtitle">Owner 可以把其他本地 OpenClaw 安装目录登记进来，形成第一版多实例管理入口。</p>
+                </div>
+              </div>
+              <div class="studio-grid" id="admin-instance-studio"></div>
+            </section>
+          </div>
+
+          <div class="split-grid">
+            <section class="panel">
+              <div class="panel-head">
+                <div>
                   <h2 class="panel-title">团队席位</h2>
                   <p class="panel-subtitle">现在开始按人管理访问，而不是继续靠单一兜底 token。</p>
                 </div>
@@ -2375,6 +2400,8 @@ __STYLE_VARS__
       openclawCommandList: document.getElementById("openclaw-command-list"),
       adminSummaryList: document.getElementById("admin-summary-list"),
       adminRoleList: document.getElementById("admin-role-list"),
+      adminInstanceList: document.getElementById("admin-instance-list"),
+      adminInstanceStudio: document.getElementById("admin-instance-studio"),
       adminUserList: document.getElementById("admin-user-list"),
       adminUserStudio: document.getElementById("admin-user-studio"),
       adminAuditFeed: document.getElementById("admin-audit-feed"),
@@ -3264,6 +3291,7 @@ __STYLE_VARS__
 
     function renderAdminView() {
       const admin = state.admin || {};
+      const instances = admin.instances || [];
       const users = admin.users || [];
       const hasSeatVisibility = hasPermission("auditView") || hasPermission("adminWrite");
       const userOptions = users.map((user) => ({
@@ -3272,6 +3300,8 @@ __STYLE_VARS__
       }));
       clearNode(refs.adminSummaryList);
       clearNode(refs.adminRoleList);
+      clearNode(refs.adminInstanceList);
+      clearNode(refs.adminInstanceStudio);
       clearNode(refs.adminUserList);
       clearNode(refs.adminUserStudio);
       clearNode(refs.adminAuditFeed);
@@ -3302,6 +3332,11 @@ __STYLE_VARS__
           body: (admin.workspace || {}).storagePath || "当前还没有记录产品数据库路径。",
           meta: "1.14.0 起账号与审计优先走 SQLite 存储层，而不是分散的 JSON 文件。",
         },
+        {
+          title: "安装舰队",
+          body: `已登记 ${(admin.instanceSummary || {}).total || 0} 套 OpenClaw 安装。`,
+          meta: `可达 ${(admin.instanceSummary || {}).reachable || 0} · 缺失 ${(admin.instanceSummary || {}).missing || 0} · 异常 ${(admin.instanceSummary || {}).broken || 0} · 活跃任务 ${(admin.instanceSummary || {}).activeTasks || 0}`,
+        },
       ];
       summaries.forEach((item) => {
         const card = el("div", "deliverable-card");
@@ -3331,6 +3366,108 @@ __STYLE_VARS__
       });
       if (!(admin.roleMatrix || []).length) {
         refs.adminRoleList.append(el("div", "empty", "当前还没有角色矩阵数据。"));
+      }
+
+      if (!instances.length) {
+        refs.adminInstanceList.append(el("div", "empty", "当前还没有登记任何 OpenClaw 安装实例。"));
+      } else {
+        instances.forEach((instance) => {
+          const card = el("div", "deliverable-card");
+          const head = el("div", "deliverable-head");
+          const left = el("div");
+          left.append(el("div", "deliverable-title", instance.label || instance.openclawDir));
+          left.append(el("div", "list-meta", `${instance.themeLabel || instance.theme || "未知主题"} · ${instance.routerAgentId || "未知路由 Agent"}`));
+          head.append(left);
+          const toneMap = { current: "active", ready: "standby", broken: "blocked", missing: "blocked" };
+          head.append(el("div", `status-pill status-${toneMap[instance.status] || "idle"}`, instance.statusLabel || instance.status || "未知"));
+          card.append(head);
+          card.append(el("div", "command-desc", instance.statusNote || "本地安装实例。"));
+          card.append(el("div", "path-line", instance.openclawDir || "未记录目录"));
+          if (instance.projectDir) {
+            card.append(el("div", "path-line", `源仓库：${instance.projectDir}`));
+          }
+          const chips = el("div", "drawer-chip-row");
+          [
+            `${instance.agentCount || 0} 个 Agent`,
+            `${instance.activeTasks || 0} 个活跃任务`,
+            `${instance.blockedTasks || 0} 个阻塞任务`,
+            instance.updatedAgo ? `最近快照 ${instance.updatedAgo}` : "还没有快照",
+          ].forEach((label) => chips.append(el("span", "drawer-chip", label)));
+          card.append(chips);
+          const actions = el("div", "action-footer");
+          actions.append(makeCopyButton(instance.openclawDir || "", "复制目录"));
+          if (instance.projectDir) {
+            actions.append(makeCopyButton(instance.projectDir, "复制仓库路径"));
+          }
+          if (hasPermission("adminWrite") && !instance.current) {
+            const removeButton = el("button", "button secondary small", "移除登记");
+            removeButton.type = "button";
+            removeButton.addEventListener("click", async () => {
+              setButtonBusy(removeButton, true, "移除中...");
+              try {
+                const data = await postActionJson("/api/actions/admin/instance/remove", {
+                  openclawDir: instance.openclawDir,
+                });
+                showToast(data.message || "安装实例已移除。", "success");
+              } catch (error) {
+                showToast(error.message, "error");
+              } finally {
+                setButtonBusy(removeButton, false);
+              }
+            });
+            actions.append(removeButton);
+          }
+          card.append(actions);
+          refs.adminInstanceList.append(card);
+        });
+      }
+
+      if (!hasPermission("adminWrite")) {
+        refs.adminInstanceStudio.append(el("div", "empty", "只有 Owner 可以登记和维护安装实例。"));
+      } else {
+        const instanceCard = el("section", "studio-card");
+        instanceCard.append(el("div", "studio-eyebrow", "Fleet Registry"));
+        instanceCard.append(el("div", "deliverable-title", "登记新的 OpenClaw 安装"));
+        instanceCard.append(el("div", "studio-copy", "输入另一套本地 OpenClaw 安装目录，Mission Control 会读取它的配置、主题和任务状态，把它纳入当前控制平面。"));
+        const form = el("form", "studio-form");
+        const labelInput = makeInput("例如：深圳交付中心", "", "text");
+        const dirInput = makeInput("/Users/you/.openclaw-staging", "", "text");
+        const submit = el("button", "button", "登记实例");
+        submit.type = "submit";
+        const inline = el("div", "status-inline", "需要目标目录里已有 openclaw.json。当前实例会自动同步，不需要手动重复登记。");
+        form.append(makeField("显示名称", labelInput, "可选。留空时会自动用该实例主题名或目录名。"));
+        form.append(makeField("OpenClaw 目录", dirInput, "例如另一套 `~/.openclaw-*` 安装。当前版本先支持本机本地路径。"));
+        const footer = el("div", "action-footer");
+        footer.append(submit);
+        footer.append(inline);
+        form.append(footer);
+        form.addEventListener("submit", async (event) => {
+          event.preventDefault();
+          if (!dirInput.value.trim()) {
+            inline.textContent = "请先输入 OpenClaw 安装目录。";
+            showToast("请先输入 OpenClaw 安装目录。", "warn");
+            return;
+          }
+          setButtonBusy(submit, true, "登记中...");
+          inline.textContent = "正在读取并登记安装实例。";
+          try {
+            const data = await postActionJson("/api/actions/admin/instance/register", {
+              openclawDir: dirInput.value.trim(),
+              label: labelInput.value.trim(),
+            });
+            inline.textContent = data.message || "安装实例已登记。";
+            showToast(data.message || "安装实例已登记。", "success");
+            labelInput.value = "";
+            dirInput.value = "";
+          } catch (error) {
+            inline.textContent = error.message;
+            showToast(error.message, "error");
+          } finally {
+            setButtonBusy(submit, false);
+          }
+        });
+        instanceCard.append(form);
+        refs.adminInstanceStudio.append(instanceCard);
       }
 
       if (!users.length) {
@@ -6206,9 +6343,154 @@ def load_audit_events(openclaw_dir, limit=80):
     return store_load_audit_events(openclaw_dir, limit=limit)
 
 
+def default_installation_label(config, openclaw_dir):
+    metadata = config.get("sanshengLiubu", {})
+    theme_name = metadata.get("theme", "imperial")
+    return (
+        metadata.get("displayName")
+        or THEME_CATALOG.get(theme_name, {}).get("displayName")
+        or Path(openclaw_dir).expanduser().name
+        or str(openclaw_dir)
+    )
+
+
+def sync_current_installation_registry(openclaw_dir, config):
+    resolved_dir = str(Path(openclaw_dir).expanduser().resolve())
+    metadata = config.get("sanshengLiubu", {})
+    return store_upsert_product_installation(
+        openclaw_dir,
+        {
+            "openclawDir": resolved_dir,
+            "label": default_installation_label(config, resolved_dir),
+            "projectDir": str(metadata.get("projectDir", "")).strip(),
+            "theme": str(metadata.get("theme", "imperial")).strip(),
+            "routerAgentId": get_router_agent_id(config),
+        },
+    )
+
+
+def summarize_installation_record(current_openclaw_dir, installation, now):
+    openclaw_path = Path(str(installation.get("openclawDir", "") or "")).expanduser()
+    current_path = Path(current_openclaw_dir).expanduser().resolve()
+    resolved_target = openclaw_path.resolve() if openclaw_path.exists() else openclaw_path
+    summary = {
+        "id": installation.get("id", ""),
+        "label": installation.get("label") or openclaw_path.name or str(openclaw_path),
+        "openclawDir": str(openclaw_path),
+        "projectDir": installation.get("projectDir", ""),
+        "theme": installation.get("theme", ""),
+        "themeLabel": THEME_CATALOG.get(installation.get("theme", ""), {}).get("displayName", installation.get("theme", "") or "未知主题"),
+        "routerAgentId": installation.get("routerAgentId", ""),
+        "agentCount": 0,
+        "activeTasks": 0,
+        "blockedTasks": 0,
+        "status": "missing",
+        "statusLabel": "目录缺失",
+        "statusNote": "登记的 OpenClaw 目录当前不存在，建议检查路径或移除旧实例。",
+        "updatedAt": installation.get("updatedAt", ""),
+        "updatedAgo": format_age(parse_iso(installation.get("updatedAt")), now),
+        "current": resolved_target == current_path,
+    }
+    config_path = openclaw_path / "openclaw.json"
+    if not openclaw_path.exists():
+        return summary
+    if not config_path.exists():
+        summary["status"] = "broken"
+        summary["statusLabel"] = "缺少配置"
+        summary["statusNote"] = "目录存在，但没有找到 openclaw.json。"
+        return summary
+    try:
+        config = load_config(openclaw_path)
+        theme_name = config.get("sanshengLiubu", {}).get("theme", "") or summary["theme"] or "imperial"
+        tasks = merge_tasks(openclaw_path, config)
+        active_tasks = 0
+        blocked_tasks = 0
+        for task in tasks:
+            state = str(task.get("state", task.get("status", ""))).lower()
+            if state not in TERMINAL_STATES:
+                active_tasks += 1
+            if state == "blocked":
+                blocked_tasks += 1
+        generated_at = ""
+        dashboard_snapshot = load_json(openclaw_path / "dashboard" / "collaboration-dashboard.json", {})
+        if isinstance(dashboard_snapshot, dict):
+            generated_at = dashboard_snapshot.get("generatedAt", "") or ""
+        updated_at = generated_at or installation.get("updatedAt", "")
+        summary.update(
+            {
+                "label": config.get("sanshengLiubu", {}).get("displayName") or summary["label"],
+                "projectDir": config.get("sanshengLiubu", {}).get("projectDir", "") or summary["projectDir"],
+                "theme": theme_name,
+                "themeLabel": THEME_CATALOG.get(theme_name, {}).get("displayName", theme_name),
+                "routerAgentId": get_router_agent_id(config),
+                "agentCount": len(load_agents(config)),
+                "activeTasks": active_tasks,
+                "blockedTasks": blocked_tasks,
+                "status": "current" if summary["current"] else "ready",
+                "statusLabel": "当前实例" if summary["current"] else "可管理",
+                "statusNote": "本地路径可达，配置完整，可以纳入产品控制平面。" if not summary["current"] else "这就是你当前打开的 Mission Control 所属实例。",
+                "updatedAt": updated_at,
+                "updatedAgo": format_age(parse_iso(updated_at), now) if updated_at else summary["updatedAgo"],
+            }
+        )
+        return summary
+    except Exception as error:
+        summary["status"] = "broken"
+        summary["statusLabel"] = "读取失败"
+        summary["statusNote"] = f"读取安装实例时发生异常：{error}"
+        return summary
+
+
+def register_installation(openclaw_dir, target_dir, label=""):
+    raw_target = str(target_dir or "").strip()
+    if not raw_target:
+        raise RuntimeError("请先输入 OpenClaw 安装目录。")
+    candidate = Path(raw_target).expanduser()
+    if not candidate.exists():
+        raise RuntimeError(f"目录不存在：{candidate}")
+    resolved = candidate.resolve()
+    config_path = resolved / "openclaw.json"
+    if not config_path.exists():
+        raise RuntimeError(f"目录 {resolved} 中没有找到 openclaw.json。")
+    config = load_config(resolved)
+    if not load_agents(config):
+        raise RuntimeError("该安装目录的 openclaw.json 没有可识别的 agents。")
+    metadata = config.get("sanshengLiubu", {})
+    theme_name = metadata.get("theme", "imperial")
+    entry = store_upsert_product_installation(
+        openclaw_dir,
+        {
+            "openclawDir": str(resolved),
+            "label": str(label or "").strip() or default_installation_label(config, resolved),
+            "projectDir": str(metadata.get("projectDir", "")).strip(),
+            "theme": theme_name,
+            "routerAgentId": get_router_agent_id(config),
+        },
+    )
+    return entry
+
+
+def remove_installation(openclaw_dir, target_dir):
+    raw_target = str(target_dir or "").strip()
+    if not raw_target:
+        raise RuntimeError("请先选择要移除的安装实例。")
+    current_dir = str(Path(openclaw_dir).expanduser().resolve())
+    candidate = str(Path(raw_target).expanduser().resolve())
+    if candidate == current_dir:
+        raise RuntimeError("不能移除当前正在运行的 Mission Control 实例。")
+    if not store_delete_product_installation(openclaw_dir, candidate):
+        raise RuntimeError("指定的安装实例不存在。")
+    return candidate
+
+
 def build_admin_data(openclaw_dir, config, now, include_sensitive=True):
+    sync_current_installation_registry(openclaw_dir, config)
     users = [safe_user_record(user) for user in load_product_users(openclaw_dir)]
     audit_events = load_audit_events(openclaw_dir, limit=60)
+    installations = [
+        summarize_installation_record(openclaw_dir, item, now)
+        for item in store_load_product_installations(openclaw_dir)
+    ]
     counts = Counter(user["role"] for user in users)
     status_counts = Counter(user.get("status", "active") for user in users)
     actions_24h = 0
@@ -6251,6 +6533,13 @@ def build_admin_data(openclaw_dir, config, now, include_sensitive=True):
             "openclawDir": str(openclaw_dir),
             "storagePath": str(dashboard_store_path(openclaw_dir)),
         },
+        "instanceSummary": {
+            "total": len(installations),
+            "reachable": sum(1 for item in installations if item.get("status") in {"ready", "current"}),
+            "broken": sum(1 for item in installations if item.get("status") == "broken"),
+            "missing": sum(1 for item in installations if item.get("status") == "missing"),
+            "activeTasks": sum(int(item.get("activeTasks") or 0) for item in installations),
+        },
         "seatSummary": {
             "total": len(users),
             "owner": counts["owner"],
@@ -6261,6 +6550,7 @@ def build_admin_data(openclaw_dir, config, now, include_sensitive=True):
             "actions24h": actions_24h,
             "failedLogins24h": failed_logins_24h,
         },
+        "instances": installations if include_sensitive else [item for item in installations if item.get("current")],
         "users": users if include_sensitive else [],
         "auditEvents": recent_events[:32] if include_sensitive else [],
         "roleMatrix": role_matrix,
@@ -7428,6 +7718,47 @@ class CollaborationDashboardHandler(BaseHTTPRequestHandler):
                     {
                         "ok": True,
                         "message": f"团队账号 {user['displayName']} 的密码已经重置。",
+                        "dashboard": data,
+                    }
+                )
+                return
+
+            if path == "/api/actions/admin/instance/register":
+                if not self._require_capability("adminWrite", "只有 Owner 可以登记和维护安装实例。"):
+                    return
+                target_dir = str(payload.get("openclawDir", "")).strip()
+                label = str(payload.get("label", "")).strip()
+                installation = register_installation(self.server.openclaw_dir, target_dir, label=label)
+                self._audit(
+                    "installation_register",
+                    detail=f"登记安装实例 {installation['label']}",
+                    meta={"openclawDir": installation["openclawDir"], "theme": installation.get("theme", "")},
+                )
+                data, _paths = self._refreshed_bundle()
+                self._send_json(
+                    {
+                        "ok": True,
+                        "message": f"安装实例 {installation['label']} 已登记进控制平面。",
+                        "dashboard": data,
+                    }
+                )
+                return
+
+            if path == "/api/actions/admin/instance/remove":
+                if not self._require_capability("adminWrite", "只有 Owner 可以登记和维护安装实例。"):
+                    return
+                target_dir = str(payload.get("openclawDir", "")).strip()
+                removed_dir = remove_installation(self.server.openclaw_dir, target_dir)
+                self._audit(
+                    "installation_remove",
+                    detail=f"移除安装实例 {removed_dir}",
+                    meta={"openclawDir": removed_dir},
+                )
+                data, _paths = self._refreshed_bundle()
+                self._send_json(
+                    {
+                        "ok": True,
+                        "message": "安装实例已从控制平面移除。",
                         "dashboard": data,
                     }
                 )

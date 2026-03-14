@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 def now_iso():
@@ -86,14 +86,23 @@ def _ensure_schema(conn):
             meta_json TEXT NOT NULL
         );
 
+        CREATE TABLE IF NOT EXISTS product_installations (
+            openclaw_dir TEXT PRIMARY KEY,
+            installation_id TEXT NOT NULL,
+            label TEXT NOT NULL,
+            project_dir TEXT NOT NULL,
+            theme TEXT NOT NULL,
+            router_agent_id TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+
         CREATE INDEX IF NOT EXISTS idx_audit_events_at ON audit_events(at DESC);
         CREATE INDEX IF NOT EXISTS idx_product_users_created_at ON product_users(created_at);
+        CREATE INDEX IF NOT EXISTS idx_product_installations_updated_at ON product_installations(updated_at DESC);
         """
     )
-    conn.execute(
-        "INSERT OR IGNORE INTO metadata(key, value) VALUES (?, ?)",
-        ("schema_version", str(SCHEMA_VERSION)),
-    )
+    _set_metadata(conn, "schema_version", str(SCHEMA_VERSION))
     conn.commit()
 
 
@@ -145,6 +154,26 @@ def _normalize_audit_event(event):
         "detail": str(event.get("detail") or ""),
         "actor_json": json.dumps(actor, ensure_ascii=False, separators=(",", ":")),
         "meta_json": json.dumps(meta, ensure_ascii=False, separators=(",", ":")),
+    }
+
+
+def _normalize_installation_record(record):
+    if not isinstance(record, dict):
+        return None
+    openclaw_dir = str(record.get("openclawDir") or record.get("openclaw_dir") or "").strip()
+    if not openclaw_dir:
+        return None
+    created_at = record.get("createdAt") or record.get("created_at") or now_iso()
+    updated_at = record.get("updatedAt") or record.get("updated_at") or created_at
+    return {
+        "openclaw_dir": openclaw_dir,
+        "installation_id": record.get("id") or record.get("installation_id") or secrets.token_hex(8),
+        "label": str(record.get("label") or record.get("displayName") or Path(openclaw_dir).name or openclaw_dir).strip(),
+        "project_dir": str(record.get("projectDir") or record.get("project_dir") or "").strip(),
+        "theme": str(record.get("theme") or "").strip(),
+        "router_agent_id": str(record.get("routerAgentId") or record.get("router_agent_id") or "").strip(),
+        "created_at": created_at,
+        "updated_at": updated_at,
     }
 
 
@@ -238,6 +267,81 @@ def load_product_users(openclaw_dir):
         }
         for row in rows
     ]
+
+
+def load_product_installations(openclaw_dir):
+    with _connect(openclaw_dir) as conn:
+        rows = conn.execute(
+            """
+            SELECT openclaw_dir, installation_id, label, project_dir, theme, router_agent_id, created_at, updated_at
+            FROM product_installations
+            ORDER BY updated_at DESC, label ASC
+            """
+        ).fetchall()
+    return [
+        {
+            "id": row["installation_id"],
+            "openclawDir": row["openclaw_dir"],
+            "label": row["label"],
+            "projectDir": row["project_dir"],
+            "theme": row["theme"],
+            "routerAgentId": row["router_agent_id"],
+            "createdAt": row["created_at"],
+            "updatedAt": row["updated_at"],
+        }
+        for row in rows
+    ]
+
+
+def upsert_product_installation(openclaw_dir, installation):
+    normalized = _normalize_installation_record(installation)
+    if not normalized:
+        raise RuntimeError("installation record is missing openclawDir")
+    with _connect(openclaw_dir) as conn:
+        conn.execute(
+            """
+            INSERT INTO product_installations(
+                openclaw_dir, installation_id, label, project_dir, theme, router_agent_id, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(openclaw_dir) DO UPDATE SET
+                label = excluded.label,
+                project_dir = excluded.project_dir,
+                theme = excluded.theme,
+                router_agent_id = excluded.router_agent_id,
+                updated_at = excluded.updated_at
+            """,
+            (
+                normalized["openclaw_dir"],
+                normalized["installation_id"],
+                normalized["label"],
+                normalized["project_dir"],
+                normalized["theme"],
+                normalized["router_agent_id"],
+                normalized["created_at"],
+                normalized["updated_at"],
+            ),
+        )
+        conn.commit()
+    return {
+        "id": normalized["installation_id"],
+        "openclawDir": normalized["openclaw_dir"],
+        "label": normalized["label"],
+        "projectDir": normalized["project_dir"],
+        "theme": normalized["theme"],
+        "routerAgentId": normalized["router_agent_id"],
+        "createdAt": normalized["created_at"],
+        "updatedAt": normalized["updated_at"],
+    }
+
+
+def delete_product_installation(openclaw_dir, target_openclaw_dir):
+    normalized_dir = str(target_openclaw_dir or "").strip()
+    if not normalized_dir:
+        return False
+    with _connect(openclaw_dir) as conn:
+        cursor = conn.execute("DELETE FROM product_installations WHERE openclaw_dir = ?", (normalized_dir,))
+        conn.commit()
+    return cursor.rowcount > 0
 
 
 def save_product_users(openclaw_dir, users):

@@ -105,6 +105,39 @@ class DashboardStoreTests(unittest.TestCase):
             self.assertEqual(len(events), 1)
             self.assertEqual(events[0]["meta"]["taskId"], "T-1")
 
+    def test_roundtrip_installation_registry(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            openclaw_dir = Path(tmpdir)
+
+            current = dashboard_store.upsert_product_installation(
+                openclaw_dir,
+                {
+                    "openclawDir": "/tmp/openclaw-a",
+                    "label": "Imperial HQ",
+                    "projectDir": "/repo/a",
+                    "theme": "imperial",
+                    "routerAgentId": "taizi",
+                },
+            )
+            dashboard_store.upsert_product_installation(
+                openclaw_dir,
+                {
+                    "openclawDir": "/tmp/openclaw-b",
+                    "label": "Corporate Ops",
+                    "projectDir": "/repo/b",
+                    "theme": "corporate",
+                    "routerAgentId": "secretary",
+                },
+            )
+            installations = dashboard_store.load_product_installations(openclaw_dir)
+
+            self.assertEqual(len(installations), 2)
+            self.assertEqual({item["theme"] for item in installations}, {"imperial", "corporate"})
+            self.assertTrue(
+                dashboard_store.delete_product_installation(openclaw_dir, current["openclawDir"])
+            )
+            self.assertEqual(len(dashboard_store.load_product_installations(openclaw_dir)), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

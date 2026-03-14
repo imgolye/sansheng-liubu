@@ -278,7 +278,7 @@ def cmd_create(task_id, title, state, org, official, remark=None):
     if not valid:
         log.warning(f'⚠️ 拒绝创建 {task_id}：{reason}')
         print(f'[看板] 拒绝创建：{reason}', flush=True)
-        return
+        return 1
     actual_org = STATE_ORG_MAP.get(state, org)
     clean_remark = _sanitize_remark(remark) if remark else f"{_OWNER_TITLE}: {title}"
     create_conflict = {'state': None}

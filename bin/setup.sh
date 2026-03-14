@@ -6,7 +6,7 @@ set -euo pipefail
 #  用法: bash setup.sh [--theme imperial|corporate|startup]
 # ============================================================
 
-VERSION="1.7.0"
+VERSION="1.8.0"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 TEMPLATES_DIR="$PROJECT_DIR/templates"
@@ -201,6 +201,7 @@ GEN_CONFIG_ARGS=(
   --qq-app-id "$QQ_APP_ID"
   --qq-client-secret "$QQ_CLIENT_SECRET"
   --task-prefix "$TASK_PREFIX"
+  --project-dir "$PROJECT_DIR"
 )
 if [[ -f "$OPENCLAW_DIR/openclaw.json" ]]; then
   GEN_CONFIG_ARGS+=(--base-config "$OPENCLAW_DIR/openclaw.json")

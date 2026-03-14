@@ -8,6 +8,7 @@ import hashlib
 import hmac
 import json
 import os
+import subprocess
 import time
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
@@ -18,6 +19,7 @@ from urllib.parse import parse_qs, quote, urlsplit
 
 
 TERMINAL_STATES = {"done", "cancelled", "canceled"}
+PRODUCT_VERSION = "1.8.0"
 THEME_STYLES = {
     "imperial": {
         "bg": "#efe4d6",
@@ -482,6 +484,185 @@ __STYLE_VARS__
       box-shadow: none;
       border: 1px solid var(--line);
     }
+    .button:disabled {
+      opacity: 0.58;
+      cursor: wait;
+      transform: none;
+    }
+    .toast-stack {
+      position: fixed;
+      right: 16px;
+      bottom: 16px;
+      z-index: 120;
+      display: grid;
+      gap: 10px;
+      width: min(360px, calc(100vw - 24px));
+      pointer-events: none;
+    }
+    .toast {
+      border-radius: 20px;
+      border: 1px solid var(--line);
+      background: color-mix(in srgb, var(--panel) 86%, white 14%);
+      box-shadow: 0 18px 38px rgba(70, 44, 28, 0.12);
+      padding: 14px 16px;
+      display: grid;
+      gap: 6px;
+      transform: translateY(0);
+      transition: opacity 180ms ease-out, transform 180ms ease-out;
+      pointer-events: auto;
+    }
+    .toast[data-hiding="true"] {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+    .toast strong {
+      font-size: 0.95rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+    .toast p {
+      margin: 0;
+      line-height: 1.6;
+      color: var(--muted);
+    }
+    .toast[data-tone="success"] strong { color: var(--ok); }
+    .toast[data-tone="warn"] strong { color: var(--warn); }
+    .toast[data-tone="error"] strong { color: var(--danger); }
+    .studio-grid,
+    .drawer-action-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+    }
+    .studio-card {
+      border-radius: 22px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,0.64);
+      padding: 16px;
+      display: grid;
+      gap: 12px;
+      align-content: start;
+    }
+    .studio-eyebrow {
+      color: var(--accentStrong);
+      font-size: 0.78rem;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      font-weight: 700;
+    }
+    .studio-copy,
+    .field-hint,
+    .status-inline,
+    .selection-meta {
+      color: var(--muted);
+      line-height: 1.6;
+    }
+    .studio-copy {
+      font-size: 0.94rem;
+    }
+    .studio-form {
+      display: grid;
+      gap: 12px;
+    }
+    .form-field {
+      display: grid;
+      gap: 8px;
+    }
+    .field-label {
+      font-size: 0.92rem;
+      font-weight: 700;
+    }
+    .field-hint {
+      font-size: 0.84rem;
+    }
+    .text-input,
+    .text-area {
+      width: 100%;
+      border-radius: 16px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,0.84);
+      color: var(--ink);
+      padding: 12px 14px;
+      outline: none;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.58);
+      transition: border-color 140ms ease-out, box-shadow 140ms ease-out;
+    }
+    .text-area {
+      resize: vertical;
+      min-height: 110px;
+    }
+    .text-input:focus,
+    .text-area:focus {
+      border-color: color-mix(in srgb, var(--accent) 30%, var(--line));
+      box-shadow: 0 0 0 4px rgba(203, 90, 30, 0.08);
+    }
+    .check-row {
+      display: flex;
+      gap: 10px;
+      align-items: flex-start;
+      color: var(--muted);
+      font-size: 0.92rem;
+      line-height: 1.55;
+    }
+    .check-row input {
+      margin-top: 3px;
+      accent-color: var(--accent);
+    }
+    .action-footer {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+    }
+    .status-inline {
+      min-height: 1.6em;
+      font-size: 0.9rem;
+    }
+    .selection-card {
+      border-radius: 22px;
+      border: 1px solid var(--line);
+      background:
+        linear-gradient(150deg, rgba(255,255,255,0.74), rgba(255,255,255,0.52)),
+        radial-gradient(circle at 100% 0%, color-mix(in srgb, var(--accentSoft) 62%, white 38%), transparent 44%);
+      padding: 18px;
+      display: grid;
+      gap: 12px;
+    }
+    .selection-title {
+      font-family: "Fraunces", "Times New Roman", serif;
+      font-size: 1.5rem;
+      line-height: 1.02;
+    }
+    .selection-stats {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+    }
+    .selection-stat {
+      border-radius: 16px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,0.72);
+      padding: 12px;
+    }
+    .selection-stat span {
+      display: block;
+      color: var(--muted);
+      font-size: 0.76rem;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      font-weight: 700;
+    }
+    .selection-stat strong {
+      display: block;
+      margin-top: 5px;
+      font-size: 1.02rem;
+    }
+    .theme-card-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+    }
     .live-indicator {
       display: inline-flex;
       align-items: center;
@@ -807,6 +988,7 @@ __STYLE_VARS__
       background: rgba(37, 27, 21, 0.28);
       backdrop-filter: blur(6px);
       z-index: 40;
+      pointer-events: none;
     }
     .drawer {
       position: fixed;
@@ -1321,6 +1503,7 @@ __STYLE_VARS__
       .rail { position: static; }
       .topbar { grid-template-columns: 1fr; }
       .overview-grid, .split-grid { grid-template-columns: 1fr; }
+      .studio-grid, .drawer-action-grid { grid-template-columns: 1fr; }
       .status-strip { grid-template-columns: repeat(3, minmax(0, 1fr)); }
       .metric-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
       .relay-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -1335,6 +1518,7 @@ __STYLE_VARS__
       .relay-grid { grid-template-columns: 1fr; }
       .status-strip { grid-template-columns: 1fr 1fr; }
       .agent-facts, .drawer-grid { grid-template-columns: 1fr 1fr; }
+      .selection-stats { grid-template-columns: 1fr; }
       .panel-head { padding: 18px 18px 10px; }
       .agent-grid, .task-list, .event-feed { padding: 16px; }
       .event-feed::before { left: 16px; }
@@ -1492,6 +1676,28 @@ __STYLE_VARS__
         </section>
 
         <section class="view" data-view="tasks" hidden>
+          <div class="split-grid">
+            <section class="panel">
+              <div class="panel-head">
+                <div>
+                  <h2 class="panel-title">操作工作台</h2>
+                  <p class="panel-subtitle">现在可以直接在产品里建任务，不需要先回到终端。打开任意任务后，还能在抽屉里继续推进、阻塞或完成。</p>
+                </div>
+              </div>
+              <div class="studio-grid" id="task-action-studio"></div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-head">
+                <div>
+                  <h2 class="panel-title">当前焦点任务</h2>
+                  <p class="panel-subtitle">这里会跟着你最近打开的任务变化，方便你在操作前快速确认上下文。</p>
+                </div>
+              </div>
+              <div id="task-focus-card"></div>
+            </section>
+          </div>
+
           <section class="panel">
             <div class="panel-head">
               <div>
@@ -1600,6 +1806,7 @@ __STYLE_VARS__
       <div class="drawer-body" id="drawer-body"></div>
     </div>
   </aside>
+  <div class="toast-stack" id="toast-stack" aria-live="polite"></div>
 
   <script id="dashboard-data" type="application/json">__INITIAL_STATE__</script>
   <script>
@@ -1648,6 +1855,8 @@ __STYLE_VARS__
       agentStatusStrip: document.getElementById("agent-status-strip"),
       agentsPageGrid: document.getElementById("agents-page-grid"),
       taskFilterRow: document.getElementById("task-filter-row"),
+      taskActionStudio: document.getElementById("task-action-studio"),
+      taskFocusCard: document.getElementById("task-focus-card"),
       tasksPageList: document.getElementById("tasks-page-list"),
       deliverablesList: document.getElementById("deliverables-list"),
       taskCommandList: document.getElementById("task-command-list"),
@@ -1675,6 +1884,7 @@ __STYLE_VARS__
       drawerTitle: document.getElementById("drawer-title"),
       drawerBody: document.getElementById("drawer-body"),
       drawerClose: document.getElementById("drawer-close"),
+      toastStack: document.getElementById("toast-stack"),
     };
 
     let paused = false;
@@ -1889,6 +2099,122 @@ __STYLE_VARS__
         }, 1200);
       });
       return button;
+    }
+
+    function runtimeCaps() {
+      return state.runtime || {};
+    }
+
+    function supportsActions() {
+      return supportsHttp && Boolean(runtimeCaps().actionsEnabled);
+    }
+
+    function supportsThemeSwitch() {
+      return supportsActions() && Boolean(runtimeCaps().themeSwitchAvailable);
+    }
+
+    function showToast(message, tone = "success", title = "") {
+      if (!refs.toastStack) return;
+      const toast = el("div", "toast");
+      toast.dataset.tone = tone;
+      toast.append(el("strong", "", title || (tone === "success" ? "已完成" : tone === "warn" ? "请注意" : "操作失败")));
+      toast.append(el("p", "", message));
+      refs.toastStack.append(toast);
+      setTimeout(() => {
+        toast.dataset.hiding = "true";
+      }, 2400);
+      setTimeout(() => {
+        toast.remove();
+      }, 2700);
+    }
+
+    function setButtonBusy(button, busy, busyLabel = "处理中...") {
+      if (!button) return;
+      if (!button.dataset.defaultLabel) {
+        button.dataset.defaultLabel = button.textContent;
+      }
+      button.disabled = busy;
+      button.textContent = busy ? busyLabel : button.dataset.defaultLabel;
+    }
+
+    async function postActionJson(path, payload) {
+      if (!supportsActions()) {
+        throw new Error("请通过本地登录后的产品页面执行操作。");
+      }
+      const response = await fetch(path, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        credentials: "same-origin",
+        body: JSON.stringify({
+          ...payload,
+          actionToken: runtimeCaps().actionToken || "",
+        }),
+      });
+      let data = {};
+      try {
+        data = await response.json();
+      } catch (_error) {
+        data = {};
+      }
+      if (!response.ok || data.ok === false) {
+        throw new Error(data.message || data.error || `HTTP ${response.status}`);
+      }
+      if (data.dashboard) {
+        state = data.dashboard;
+        lastSyncAt = Date.now();
+        renderAll();
+      } else if (supportsHttp) {
+        await fetchLatestDashboard("manual");
+      }
+      return data;
+    }
+
+    function makeField(labelText, control, hint = "") {
+      const wrap = el("label", "form-field");
+      wrap.append(el("span", "field-label", labelText));
+      wrap.append(control);
+      if (hint) {
+        wrap.append(el("span", "field-hint", hint));
+      }
+      return wrap;
+    }
+
+    function makeInput(placeholder = "", value = "", type = "text") {
+      const input = document.createElement("input");
+      input.type = type;
+      input.className = "text-input";
+      input.placeholder = placeholder;
+      input.value = value;
+      return input;
+    }
+
+    function makeTextarea(placeholder = "", value = "", rows = 4) {
+      const area = document.createElement("textarea");
+      area.className = "text-area";
+      area.placeholder = placeholder;
+      area.rows = rows;
+      area.value = value;
+      return area;
+    }
+
+    function makeCheckbox(labelText, checked = false) {
+      const wrap = el("label", "check-row");
+      const input = document.createElement("input");
+      input.type = "checkbox";
+      input.checked = checked;
+      wrap.append(input);
+      wrap.append(el("span", "", labelText));
+      return { wrap, input };
+    }
+
+    function currentTaskForStudio() {
+      if (selection.kind === "task" && selection.id) {
+        const selected = getTask(selection.id);
+        if (selected) return selected;
+      }
+      return filteredTasks().find((task) => task.active) || filteredTasks()[0] || null;
     }
 
     function taskTone(task) {
@@ -2142,6 +2468,136 @@ __STYLE_VARS__
       });
     }
 
+    function renderTaskActionStudio() {
+      clearNode(refs.taskActionStudio);
+      const createCard = el("section", "studio-card");
+      createCard.append(el("div", "studio-eyebrow", "Quick Create"));
+      createCard.append(el("div", "deliverable-title", "直接发起一条新任务"));
+      createCard.append(el("div", "studio-copy", "适合你已经明确想推进的事项。创建后任务会直接进入规划链路，你可以立刻打开抽屉继续补进展。"));
+
+      if (!supportsActions()) {
+        createCard.append(el("div", "empty", "请通过 `--serve` 启动本地产品并登录后再执行操作。"));
+        refs.taskActionStudio.append(createCard);
+      } else {
+        const form = el("form", "studio-form");
+        const titleInput = makeTextarea("例如：整理 1.8.0 发布后的客户答疑 FAQ", "", 3);
+        const briefInput = makeTextarea("给协同链路补充一句背景、目标或优先级说明", "", 4);
+        const submit = el("button", "button", "创建并进入任务");
+        submit.type = "submit";
+        const inline = el("div", "status-inline", "系统会自动生成任务号并放入当前主题的规划入口。");
+
+        form.append(makeField("任务标题", titleInput, "标题尽量写成可执行任务，不要只是关键词。"));
+        form.append(makeField("背景说明", briefInput, "可选。它会成为任务的首条说明，帮助后续 Agent 更快接手。"));
+
+        const footer = el("div", "action-footer");
+        footer.append(submit);
+        footer.append(inline);
+        form.append(footer);
+
+        form.addEventListener("submit", async (event) => {
+          event.preventDefault();
+          const title = titleInput.value.trim();
+          const remark = briefInput.value.trim();
+          if (!title) {
+            inline.textContent = "请先写一个明确的任务标题。";
+            showToast("请先写一个明确的任务标题。", "warn");
+            return;
+          }
+          setButtonBusy(submit, true, "创建中...");
+          inline.textContent = "正在创建任务并刷新协同视图。";
+          try {
+            const data = await postActionJson("/api/actions/task/create", { title, remark });
+            titleInput.value = "";
+            briefInput.value = "";
+            inline.textContent = data.message || "任务已创建。";
+            showToast(data.message || "任务已创建。", "success");
+            if (data.taskId) {
+              openDrawer("task", data.taskId);
+            }
+          } catch (error) {
+            inline.textContent = error.message;
+            showToast(error.message, "error");
+          } finally {
+            setButtonBusy(submit, false);
+          }
+        });
+
+        createCard.append(form);
+        refs.taskActionStudio.append(createCard);
+      }
+
+      const currentTask = currentTaskForStudio();
+      const guideCard = el("section", "studio-card");
+      guideCard.append(el("div", "studio-eyebrow", "Live Context"));
+      if (!currentTask) {
+        guideCard.append(el("div", "deliverable-title", "还没有焦点任务"));
+        guideCard.append(el("div", "studio-copy", "你可以先创建一条任务，或者从下面的任务河道中打开一条已有任务。任务抽屉里已经集成了推进、阻塞和完成操作。"));
+      } else {
+        guideCard.append(el("div", "deliverable-title", currentTask.title));
+        guideCard.append(el("div", "selection-meta", `${currentTask.id} · ${currentTask.state} · 当前负责人 ${currentTask.currentAgentLabel || currentTask.org || "未知"}`));
+        guideCard.append(el("div", "studio-copy", currentTask.currentUpdate || "这条任务还没有最近进展说明。"));
+        const actions = el("div", "panel-actions");
+        const open = el("button", "button secondary", "打开任务抽屉");
+        open.type = "button";
+        open.addEventListener("click", () => openDrawer("task", currentTask.id));
+        actions.append(open);
+        guideCard.append(actions);
+      }
+      refs.taskActionStudio.append(guideCard);
+    }
+
+    function renderTaskFocusCard() {
+      clearNode(refs.taskFocusCard);
+      const task = currentTaskForStudio();
+      const card = el("div", "selection-card");
+      if (!task) {
+        card.append(el("div", "studio-eyebrow", "Focus"));
+        card.append(el("div", "selection-title", "先选一条任务"));
+        card.append(el("div", "selection-meta", "点开任务卡片后，这里会汇总它的状态、Todo 进度和路线。"));
+        refs.taskFocusCard.append(card);
+        return;
+      }
+
+      card.append(el("div", "studio-eyebrow", "Focus"));
+      card.append(el("div", "selection-title", task.title));
+      card.append(el("div", "selection-meta", `${task.id} · ${task.state} · 最近更新 ${task.updatedAgo}`));
+
+      const stats = el("div", "selection-stats");
+      [
+        ["负责人", task.currentAgentLabel || task.org || "未知"],
+        ["Todo", task.todo.total ? `${task.todo.completed}/${task.todo.total}` : "未拆分"],
+        ["路由", (task.route || []).length ? `${task.route.length} 步` : "未形成"],
+      ].forEach(([label, value]) => {
+        const stat = el("div", "selection-stat");
+        stat.append(el("span", "", label));
+        stat.append(el("strong", "", String(value)));
+        stats.append(stat);
+      });
+      card.append(stats);
+
+      const focus = el("div", "studio-copy", task.currentUpdate || "这条任务还没有最近进展说明。");
+      card.append(focus);
+
+      const route = el("div", "drawer-chip-row");
+      if ((task.route || []).length) {
+        task.route.forEach((step) => route.append(el("span", "drawer-chip", step)));
+      } else {
+        route.append(el("span", "drawer-chip", "还没有形成流转路径"));
+      }
+      card.append(route);
+
+      const actions = el("div", "panel-actions");
+      const open = el("button", "button", "进入任务操作");
+      open.type = "button";
+      open.addEventListener("click", () => openDrawer("task", task.id));
+      actions.append(open);
+      if (task.output) {
+        actions.append(makeCopyButton(task.output, "复制产出路径"));
+      }
+      card.append(actions);
+      refs.taskFocusCard.append(card);
+    }
+
     function renderThemes() {
       clearNode(refs.currentThemeSummary);
       clearNode(refs.themeGrid);
@@ -2152,6 +2608,8 @@ __STYLE_VARS__
         summary.append(el("div", "command-desc", currentTheme.summary));
         summary.append(el("div", "path-line", `适合：${currentTheme.bestFor}`));
         summary.append(el("div", "path-line", `组织气质：${currentTheme.tagline}`));
+        summary.append(el("div", "path-line", `产品版本：${runtimeCaps().productVersion || PRODUCT_VERSION}`));
+        summary.append(el("div", "path-line", supportsThemeSwitch() ? "可直接在这里切换主题" : "当前运行环境未暴露主题切换能力"));
         refs.currentThemeSummary.append(summary);
       }
       if (!(state.themeCatalog || []).length) {
@@ -2170,6 +2628,28 @@ __STYLE_VARS__
         card.append(head);
         card.append(el("div", "command-desc", theme.summary));
         card.append(el("div", "path-line", `适合场景：${theme.bestFor}`));
+        const actions = el("div", "theme-card-actions");
+        if (theme.current) {
+          actions.append(el("span", "theme-badge", "当前使用"));
+        } else if (supportsThemeSwitch()) {
+          const button = el("button", "button", "切换到此主题");
+          button.type = "button";
+          button.addEventListener("click", async () => {
+            setButtonBusy(button, true, "切换中...");
+            try {
+              const data = await postActionJson("/api/actions/theme/switch", { theme: theme.name });
+              showToast(data.message || `已切换到 ${theme.displayName}`, "success");
+            } catch (error) {
+              showToast(error.message, "error");
+            } finally {
+              setButtonBusy(button, false);
+            }
+          });
+          actions.append(button);
+        } else {
+          actions.append(el("div", "status-inline", "该环境只能查看主题，不能在产品内切换。"));
+        }
+        card.append(actions);
         refs.themeGrid.append(card);
       });
     }
@@ -2224,8 +2704,142 @@ __STYLE_VARS__
       refs.railRouterAgent.textContent = state.routerAgentId || "未知";
       refs.railInstallDir.textContent = state.openclawDir;
       refs.jsonLink.href = dashboardJsonHref();
-      refs.authStatus.textContent = supportsHttp ? "本地会话" : "快照模式";
+      refs.authStatus.textContent = supportsHttp ? (supportsActions() ? "本地会话 · 可操作" : "本地会话 · 只读") : "快照模式";
       renderCommandCards(refs.railCommandList, (state.commands || []).slice(0, 2), "暂无快速动作。");
+    }
+
+    function renderTaskActionSection(task) {
+      const section = el("section", "drawer-section");
+      section.append(el("h3", "", "任务操作"));
+      if (!supportsActions()) {
+        section.append(el("div", "empty", "请通过 `--serve` 启动本地产品并登录后，再在这里直接推进任务。"));
+        return section;
+      }
+      if (!task.active && normalizeText(task.state) === "done") {
+        section.append(el("div", "empty", "这条任务已经完成。若需要继续处理，建议重新创建一条后续任务。"));
+        return section;
+      }
+
+      const grid = el("div", "drawer-action-grid");
+
+      const progressCard = el("form", "studio-card studio-form");
+      progressCard.append(el("div", "studio-eyebrow", "Progress"));
+      progressCard.append(el("div", "deliverable-title", "追加进展"));
+      const progressInput = makeTextarea(task.currentUpdate || "例如：正在拆解接口边界，准备给工程部下发子任务", "", 4);
+      const todosInput = makeInput("用 | 分隔 todos，例如：调研|设计🔄|联调", "", "text");
+      const markDoing = makeCheckbox("如果这条任务已经进入执行阶段，同时把状态切到 `Doing`。", normalizeText(task.state) !== "doing");
+      const progressButton = el("button", "button", "同步进展");
+      progressButton.type = "submit";
+      const progressStatus = el("div", "status-inline", "进展会直接写回看板，并立即刷新页面。");
+      progressCard.append(makeField("最新进展", progressInput, "建议写成一句完整的话，方便用户和 Agent 一眼读懂。"));
+      progressCard.append(makeField("Todo 串", todosInput, "可选。支持 `已完成✅|进行中🔄|待开始` 这种格式。"));
+      progressCard.append(markDoing.wrap);
+      const progressFooter = el("div", "action-footer");
+      progressFooter.append(progressButton);
+      progressFooter.append(progressStatus);
+      progressCard.append(progressFooter);
+      progressCard.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const message = progressInput.value.trim();
+        if (!message) {
+          progressStatus.textContent = "请先写一条最新进展。";
+          showToast("请先写一条最新进展。", "warn");
+          return;
+        }
+        setButtonBusy(progressButton, true, "同步中...");
+        progressStatus.textContent = "正在把进展写入任务链路。";
+        try {
+          const data = await postActionJson("/api/actions/task/progress", {
+            taskId: task.id,
+            message,
+            todos: todosInput.value.trim(),
+            markDoing: markDoing.input.checked,
+          });
+          progressStatus.textContent = data.message || "进展已同步。";
+          showToast(data.message || "进展已同步。", "success");
+        } catch (error) {
+          progressStatus.textContent = error.message;
+          showToast(error.message, "error");
+        } finally {
+          setButtonBusy(progressButton, false);
+        }
+      });
+      grid.append(progressCard);
+
+      const blockCard = el("form", "studio-card studio-form");
+      blockCard.append(el("div", "studio-eyebrow", "Block"));
+      blockCard.append(el("div", "deliverable-title", "标记阻塞"));
+      const reasonInput = makeTextarea("例如：缺少线上环境访问权限，需要用户提供账号", "", 4);
+      const blockButton = el("button", "button secondary", "记录阻塞");
+      blockButton.type = "submit";
+      const blockStatus = el("div", "status-inline", "阻塞会在 Agent 运营和任务河道里显著标红。");
+      blockCard.append(makeField("阻塞原因", reasonInput, "尽量写清缺什么资源、谁能解除阻塞。"));
+      const blockFooter = el("div", "action-footer");
+      blockFooter.append(blockButton);
+      blockFooter.append(blockStatus);
+      blockCard.append(blockFooter);
+      blockCard.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const reason = reasonInput.value.trim();
+        if (!reason) {
+          blockStatus.textContent = "请先写明阻塞原因。";
+          showToast("请先写明阻塞原因。", "warn");
+          return;
+        }
+        setButtonBusy(blockButton, true, "记录中...");
+        blockStatus.textContent = "正在标记阻塞。";
+        try {
+          const data = await postActionJson("/api/actions/task/block", { taskId: task.id, reason });
+          blockStatus.textContent = data.message || "任务已标记阻塞。";
+          showToast(data.message || "任务已标记阻塞。", "warn");
+          reasonInput.value = "";
+        } catch (error) {
+          blockStatus.textContent = error.message;
+          showToast(error.message, "error");
+        } finally {
+          setButtonBusy(blockButton, false);
+        }
+      });
+      grid.append(blockCard);
+
+      const doneCard = el("form", "studio-card studio-form");
+      doneCard.append(el("div", "studio-eyebrow", "Done"));
+      doneCard.append(el("div", "deliverable-title", "交付完成"));
+      const summaryInput = makeTextarea("例如：MVP 已发布到 staging，并完成冒烟验证", "", 4);
+      const outputInput = makeInput("/path/to/output 或交付链接", task.output || "", "text");
+      const doneButton = el("button", "button", "标记完成");
+      doneButton.type = "submit";
+      const doneStatus = el("div", "status-inline", "完成后，这条任务会进入交付物列表。");
+      doneCard.append(makeField("完成摘要", summaryInput, "建议把最终产出、验证结果和后续提醒写在这里。"));
+      doneCard.append(makeField("产出路径", outputInput, "可选。可以是本地路径、预览链接或文档地址。"));
+      const doneFooter = el("div", "action-footer");
+      doneFooter.append(doneButton);
+      doneFooter.append(doneStatus);
+      doneCard.append(doneFooter);
+      doneCard.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const summary = summaryInput.value.trim();
+        setButtonBusy(doneButton, true, "提交中...");
+        doneStatus.textContent = "正在把任务归档到交付列表。";
+        try {
+          const data = await postActionJson("/api/actions/task/done", {
+            taskId: task.id,
+            summary,
+            output: outputInput.value.trim(),
+          });
+          doneStatus.textContent = data.message || "任务已完成。";
+          showToast(data.message || "任务已完成。", "success");
+        } catch (error) {
+          doneStatus.textContent = error.message;
+          showToast(error.message, "error");
+        } finally {
+          setButtonBusy(doneButton, false);
+        }
+      });
+      grid.append(doneCard);
+
+      section.append(grid);
+      return section;
     }
 
     function renderDrawerList(items, emptyText, onClick) {
@@ -2385,6 +2999,8 @@ __STYLE_VARS__
       todoSection.append(renderTodoItems(task.todoItems || []));
       refs.drawerBody.append(todoSection);
 
+      refs.drawerBody.append(renderTaskActionSection(task));
+
       const replaySection = el("section", "drawer-section");
       replaySection.append(el("h3", "", "协同回放"));
       replaySection.append(renderTaskReplay(task.replay || []));
@@ -2462,6 +3078,8 @@ __STYLE_VARS__
     }
 
     function renderTasksView() {
+      renderTaskActionStudio();
+      renderTaskFocusCard();
       renderTaskFilters();
       renderTasksInto(refs.tasksPageList, filteredTasks(), "当前没有匹配的任务。");
       renderDeliverables();
@@ -2580,6 +3198,13 @@ __STYLE_VARS__
       if (event.key === "Escape") {
         closeDrawer();
       }
+    });
+    window.addEventListener("click", (event) => {
+      if (refs.drawer.dataset.open !== "true") return;
+      if (refs.drawer.contains(event.target)) return;
+      if (event.target.closest(".click-card")) return;
+      if (event.target.closest(".drawer-link")) return;
+      closeDrawer();
     });
     window.addEventListener("popstate", () => {
       currentView = getViewFromLocation();
@@ -3276,6 +3901,130 @@ def expected_session_value(auth_token):
     return hmac.new(auth_token.encode("utf-8"), b"sansheng-liubu-dashboard", hashlib.sha256).hexdigest()
 
 
+def expected_action_value(auth_token):
+    if not auth_token:
+        return ""
+    return hmac.new(auth_token.encode("utf-8"), b"sansheng-liubu-dashboard-actions", hashlib.sha256).hexdigest()
+
+
+def resolve_project_dir(openclaw_dir, config=None):
+    env_project_dir = os.environ.get("SANSHENG_LIUBU_PROJECT_DIR", "").strip()
+    if env_project_dir:
+        candidate = Path(env_project_dir).expanduser().resolve()
+        if (candidate / "bin" / "switch_theme.py").exists():
+            return candidate
+
+    config = config or load_config(openclaw_dir)
+    project_dir = str(config.get("sanshengLiubu", {}).get("projectDir", "")).strip()
+    if project_dir:
+        candidate = Path(project_dir).expanduser().resolve()
+        if (candidate / "bin" / "switch_theme.py").exists():
+            return candidate
+
+    for parent in Path(__file__).resolve().parents:
+        if (parent / "bin" / "switch_theme.py").exists() and (parent / "themes").exists():
+            return parent
+    return None
+
+
+def runtime_script_path(openclaw_dir, script_name):
+    config = load_config(openclaw_dir)
+    router_agent_id = get_router_agent_id(config)
+    candidate = Path(openclaw_dir) / f"workspace-{router_agent_id}" / "scripts" / script_name
+    if candidate.exists():
+        return candidate
+    fallback = Path(__file__).resolve().with_name(script_name)
+    if fallback.exists():
+        return fallback
+    raise FileNotFoundError(f"Missing runtime script: {script_name}")
+
+
+def run_python_script(script_path, args, cwd=None):
+    process = subprocess.run(
+        ["python3", str(script_path), *[str(arg) for arg in args]],
+        capture_output=True,
+        text=True,
+        cwd=str(cwd) if cwd else None,
+        check=False,
+    )
+    output_parts = [part.strip() for part in (process.stdout, process.stderr) if part and part.strip()]
+    return process, "\n".join(output_parts)
+
+
+def perform_task_create(openclaw_dir, title, remark=""):
+    openclaw_dir = Path(openclaw_dir)
+    config = load_config(openclaw_dir)
+    router_agent_id = get_router_agent_id(config)
+    kanban_cfg = load_kanban_config(openclaw_dir, router_agent_id)
+    kanban_script = runtime_script_path(openclaw_dir, "kanban_update.py")
+    prefix = kanban_cfg.get("task_prefix", "TASK")
+    planner_title = kanban_cfg.get("state_org_map", {}).get("Zhongshu") or "Planner"
+
+    next_id_result, next_id_output = run_python_script(kanban_script, ["next-id", prefix])
+    if next_id_result.returncode != 0:
+        raise RuntimeError(next_id_output or "无法生成新的任务号。")
+    task_id = next_id_output.splitlines()[-1].strip()
+    if not task_id:
+        raise RuntimeError("任务号生成失败。")
+
+    args = ["create", task_id, title, "Zhongshu", planner_title, planner_title]
+    if remark:
+        args.append(remark)
+    create_result, create_output = run_python_script(kanban_script, args)
+    if create_result.returncode != 0:
+        raise RuntimeError(create_output or "创建任务失败。")
+    return task_id
+
+
+def perform_task_progress(openclaw_dir, task_id, message, todos="", mark_doing=False):
+    kanban_script = runtime_script_path(openclaw_dir, "kanban_update.py")
+    if mark_doing:
+        state_result, state_output = run_python_script(kanban_script, ["state", task_id, "Doing", message])
+        if state_result.returncode != 0:
+            raise RuntimeError(state_output or "无法把任务切换到执行中。")
+    args = ["progress", task_id, message]
+    if todos:
+        args.append(todos)
+    progress_result, progress_output = run_python_script(kanban_script, args)
+    if progress_result.returncode != 0:
+        raise RuntimeError(progress_output or "进展同步失败。")
+
+
+def perform_task_block(openclaw_dir, task_id, reason):
+    kanban_script = runtime_script_path(openclaw_dir, "kanban_update.py")
+    result, output = run_python_script(kanban_script, ["block", task_id, reason])
+    if result.returncode != 0:
+        raise RuntimeError(output or "阻塞标记失败。")
+
+
+def perform_task_done(openclaw_dir, task_id, output_path="", summary=""):
+    kanban_script = runtime_script_path(openclaw_dir, "kanban_update.py")
+    args = ["done", task_id]
+    if output_path or summary:
+        args.append(output_path)
+    if summary:
+        args.append(summary)
+    result, output = run_python_script(kanban_script, args)
+    if result.returncode != 0:
+        raise RuntimeError(output or "任务完成写回失败。")
+
+
+def perform_theme_switch(openclaw_dir, theme_name):
+    project_dir = resolve_project_dir(openclaw_dir)
+    if not project_dir:
+        raise RuntimeError("当前安装没有关联仓库目录，暂时无法在产品内切换主题。")
+    switch_script = project_dir / "bin" / "switch_theme.py"
+    if not switch_script.exists():
+        raise RuntimeError(f"缺少主题切换脚本: {switch_script}")
+    result, output = run_python_script(
+        switch_script,
+        ["--theme", theme_name, "--dir", str(Path(openclaw_dir).expanduser().resolve())],
+        cwd=project_dir,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(output or f"切换主题失败: {theme_name}")
+
+
 def parse_request_cookies(cookie_header):
     cookie = SimpleCookie()
     if cookie_header:
@@ -3320,7 +4069,7 @@ def render_login_html(openclaw_dir, next_path="/", error_message=""):
 
 
 class CollaborationDashboardHandler(BaseHTTPRequestHandler):
-    server_version = "SanshengDashboard/1.7"
+    server_version = "SanshengDashboard/1.8"
 
     def log_message(self, format, *args):
         return
@@ -3335,14 +4084,36 @@ class CollaborationDashboardHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _send_json(self, payload, status=200):
+        body = (json.dumps(payload, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+        self._send_bytes(body, "application/json; charset=utf-8", status=status)
+
+    def _runtime_data(self, data):
+        config = load_config(self.server.openclaw_dir)
+        project_dir = resolve_project_dir(self.server.openclaw_dir, config)
+        runtime = {
+            "productVersion": PRODUCT_VERSION,
+            "actionsEnabled": True,
+            "themeSwitchAvailable": bool(project_dir and (project_dir / "bin" / "switch_theme.py").exists()),
+            "actionToken": expected_action_value(getattr(self.server, "dashboard_auth_token", "")),
+        }
+        data["runtime"] = runtime
+        return data
+
     def _bundle(self):
-        return build_dashboard_bundle(self.server.openclaw_dir, self.server.output_dir)
+        data, paths = build_dashboard_bundle(self.server.openclaw_dir, self.server.output_dir)
+        return self._runtime_data(data), paths
 
     def _path(self):
         return urlsplit(self.path).path
 
     def _query(self):
         return parse_qs(urlsplit(self.path).query)
+
+    def _read_json_body(self):
+        length = int(self.headers.get("Content-Length", "0") or "0")
+        raw = self.rfile.read(length).decode("utf-8", "replace") if length else "{}"
+        return json.loads(raw or "{}")
 
     def _next_path(self):
         return safe_next_path(self._query().get("next", ["/"])[0])
@@ -3367,6 +4138,16 @@ class CollaborationDashboardHandler(BaseHTTPRequestHandler):
             "Set-Cookie",
             f"{SESSION_COOKIE_NAME}=; Max-Age=0; Path=/; HttpOnly; SameSite=Lax",
         )
+
+    def _require_action_token(self, payload):
+        expected = expected_action_value(getattr(self.server, "dashboard_auth_token", ""))
+        if not expected:
+            return True
+        provided = str((payload or {}).get("actionToken", "")).strip()
+        if provided and hmac.compare_digest(provided, expected):
+            return True
+        self._send_json({"ok": False, "error": "invalid_action_token", "message": "操作令牌已失效，请刷新页面后重试。"}, status=403)
+        return False
 
     def _send_redirect(self, location, extra_headers=None):
         headers = [("Location", location)]
@@ -3420,6 +4201,111 @@ class CollaborationDashboardHandler(BaseHTTPRequestHandler):
         form = parse_qs(payload)
         next_path = safe_next_path((form.get("next", ["/login"])[0] or "/login"))
         self._send_redirect(next_path, extra_headers=[self._clear_cookie_header()])
+
+    def _handle_action_post(self, path):
+        try:
+            payload = self._read_json_body()
+        except json.JSONDecodeError:
+            self._send_json({"ok": False, "error": "invalid_json", "message": "请求体不是合法 JSON。"}, status=400)
+            return
+
+        if not self._require_action_token(payload):
+            return
+
+        try:
+            if path == "/api/actions/task/create":
+                title = str(payload.get("title", "")).strip()
+                remark = str(payload.get("remark", "")).strip()
+                if not title:
+                    raise RuntimeError("任务标题不能为空。")
+                task_id = perform_task_create(self.server.openclaw_dir, title, remark=remark)
+                data, _paths = self._bundle()
+                self._send_json(
+                    {
+                        "ok": True,
+                        "message": f"任务 {task_id} 已创建，已经进入当前协同链路。",
+                        "taskId": task_id,
+                        "dashboard": data,
+                    }
+                )
+                return
+
+            if path == "/api/actions/task/progress":
+                task_id = str(payload.get("taskId", "")).strip()
+                message = str(payload.get("message", "")).strip()
+                todos = str(payload.get("todos", "")).strip()
+                mark_doing = bool(payload.get("markDoing"))
+                if not task_id or not message:
+                    raise RuntimeError("任务编号和进展内容都不能为空。")
+                perform_task_progress(self.server.openclaw_dir, task_id, message, todos=todos, mark_doing=mark_doing)
+                data, _paths = self._bundle()
+                self._send_json(
+                    {
+                        "ok": True,
+                        "message": f"任务 {task_id} 的最新进展已经同步。",
+                        "taskId": task_id,
+                        "dashboard": data,
+                    }
+                )
+                return
+
+            if path == "/api/actions/task/block":
+                task_id = str(payload.get("taskId", "")).strip()
+                reason = str(payload.get("reason", "")).strip()
+                if not task_id or not reason:
+                    raise RuntimeError("请提供任务编号和阻塞原因。")
+                perform_task_block(self.server.openclaw_dir, task_id, reason)
+                data, _paths = self._bundle()
+                self._send_json(
+                    {
+                        "ok": True,
+                        "message": f"任务 {task_id} 已标记为阻塞。",
+                        "taskId": task_id,
+                        "dashboard": data,
+                    }
+                )
+                return
+
+            if path == "/api/actions/task/done":
+                task_id = str(payload.get("taskId", "")).strip()
+                summary = str(payload.get("summary", "")).strip()
+                output_path = str(payload.get("output", "")).strip()
+                if not task_id:
+                    raise RuntimeError("请提供任务编号。")
+                perform_task_done(self.server.openclaw_dir, task_id, output_path=output_path, summary=summary)
+                data, _paths = self._bundle()
+                self._send_json(
+                    {
+                        "ok": True,
+                        "message": f"任务 {task_id} 已完成并归档到交付列表。",
+                        "taskId": task_id,
+                        "dashboard": data,
+                    }
+                )
+                return
+
+            if path == "/api/actions/theme/switch":
+                theme_name = str(payload.get("theme", "")).strip()
+                if theme_name not in THEME_CATALOG:
+                    raise RuntimeError(f"未知主题：{theme_name}")
+                perform_theme_switch(self.server.openclaw_dir, theme_name)
+                self.server.dashboard_auth_token = resolve_dashboard_auth_token(self.server.openclaw_dir)
+                data, _paths = self._bundle()
+                display_name = data.get("theme", {}).get("displayName", theme_name)
+                self._send_json(
+                    {
+                        "ok": True,
+                        "message": f"主题已切换到 {display_name}，产品上下文已经同步刷新。",
+                        "dashboard": data,
+                    }
+                )
+                return
+
+            self._send_json({"ok": False, "error": "not_found", "message": "未知操作接口。"}, status=404)
+        except RuntimeError as error:
+            self._send_json({"ok": False, "error": "action_failed", "message": str(error)}, status=400)
+        except Exception as error:
+            self._send_json({"ok": False, "error": "internal_error", "message": str(error)}, status=500)
 
     def do_GET(self):
         path = self._path()
@@ -3476,6 +4362,9 @@ class CollaborationDashboardHandler(BaseHTTPRequestHandler):
             self._handle_logout_post()
             return
         if not self._require_auth(api=path.startswith("/api/") or path == "/events"):
+            return
+        if path.startswith("/api/actions/"):
+            self._handle_action_post(path)
             return
         self._send_bytes(b"Method not allowed", "text/plain; charset=utf-8", status=405)
 

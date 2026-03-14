@@ -242,6 +242,7 @@ def build_generate_args(openclaw_dir, theme_file, existing_config, task_prefix_o
         qq_app_id=existing_config.get("channels", {}).get("qqbot", {}).get("appId", ""),
         qq_client_secret="",
         task_prefix=task_prefix_override or metadata.get("taskPrefix"),
+        project_dir=metadata.get("projectDir") or str(PROJECT_DIR),
         base_config="",
     )
 

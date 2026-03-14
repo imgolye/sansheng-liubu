@@ -4,7 +4,7 @@
 
 一键部署 11 个协作 AI Agent，模拟组织架构处理复杂任务。
 
-## 1.7.0 亮点
+## 1.8.0 亮点
 
 现在不只是一个“实时大屏”，而是一套本地可用的多 Agent 产品：
 
@@ -19,8 +19,11 @@ python3 ~/.openclaw/workspace-your-router-id/scripts/collaboration_dashboard.py 
 - 深链接路由：`/agents`、`/tasks`、`/activity`、`/themes`
 - 本地 API：`/api/agents`、`/api/tasks`、`/api/events`、`/api/themes`、`/api/deliverables`
 - 可调布局：支持收起菜单，并在运营 / 聚焦 / 紧凑三种布局间切换
-- 全局搜索、任务筛选、交付物列表、产品内置 runbook
-- Agent 明细抽屉与任务回放抽屉仍然保留
+- 操作工作台：直接在产品里创建任务，不再先回终端
+- 任务操作抽屉：可在任务详情里追加进展、标记阻塞、标记完成
+- 产品内主题切换：在主题中心直接切换 `imperial / corporate / startup`
+- 全局 toast 反馈、任务筛选、交付物列表、产品内置 runbook
+- Agent 明细抽屉与任务回放抽屉仍然保留，而且切页时不会再被抽屉挡住导航
 - 运行中切换主题：`bash bin/switch_theme.sh --theme startup`
 - 自动迁移：保留现有频道、模型、网关 token、任务板和 workspace 产物
 
@@ -173,8 +176,9 @@ http://127.0.0.1:18890/themes
 现在还能直接点开：
 
 - Agent 卡片：查看最近信号、当前关注点、在手任务
-- 任务卡片：查看任务路线、TODO 进度和完整协同回放
+- 任务卡片：查看任务路线、TODO 进度、完整协同回放，并直接推进 / 阻塞 / 完成
 - 时间线事件：从最近一次 handoff / progress 直接跳到对应任务
+- 主题卡片：直接在产品中切换主题
 
 生成结果默认在：
 

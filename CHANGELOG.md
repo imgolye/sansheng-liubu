@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.8.0 - 2026-03-14
+
+### Added
+- Added an in-product task action studio so users can create work directly from the Tasks module without leaving Mission Control.
+- Added task-operation forms inside the task replay drawer for progress updates, blocking, and completion handoff.
+- Added authenticated product action endpoints for task creation, progress, blocking, completion, and live theme switching.
+
+### Changed
+- Linked generated installs back to the source repository so the product can invoke `switch_theme.py` safely from inside the UI.
+- Promoted Mission Control from a read-only dashboard into an operational product surface with toast feedback and action-aware runtime state.
+
+### Fixed
+- Returned a non-zero exit code when task creation is rejected, so product actions no longer report false success.
+- Allowed navigation to continue while a drawer is open instead of letting the scrim block the left menu.
+- Kept generated config metadata in sync with the current release version.
+
 ## 1.7.0 - 2026-03-14
 
 ### Added

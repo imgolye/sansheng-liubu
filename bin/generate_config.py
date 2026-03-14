@@ -13,7 +13,7 @@ from pathlib import Path
 from theme_utils import load_theme
 
 
-PROJECT_VERSION = "1.2.0"
+PROJECT_VERSION = "1.8.0"
 
 
 def load_existing_config(path):
@@ -64,6 +64,16 @@ def resolve_task_prefix(args, existing_config, theme):
     if existing_prefix:
         return existing_prefix
     return theme.get("task_prefix", "JJC")
+
+
+def resolve_project_dir(args, existing_config):
+    if getattr(args, "project_dir", ""):
+        return str(Path(args.project_dir).expanduser().resolve())
+    metadata = existing_config.get("sanshengLiubu", {})
+    project_dir = metadata.get("projectDir")
+    if project_dir:
+        return str(Path(project_dir).expanduser().resolve())
+    return ""
 
 
 def resolve_memory_search(existing_config):
@@ -182,6 +192,7 @@ def build_generated_config(theme, args, existing_config=None):
     primary_model = resolve_primary_model(args, existing_config)
     light_model = resolve_light_model(args, existing_config)
     task_prefix = resolve_task_prefix(args, existing_config, theme)
+    project_dir = resolve_project_dir(args, existing_config)
 
     all_ids = [
         router["agent_id"],
@@ -307,6 +318,7 @@ def build_generated_config(theme, args, existing_config=None):
             "theme": theme["name"],
             "displayName": theme["display_name"],
             "taskPrefix": task_prefix,
+            "projectDir": project_dir,
             "generatedAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         },
         "agents": {
@@ -396,6 +408,7 @@ def main():
     parser.add_argument("--qq-app-id", default="")
     parser.add_argument("--qq-client-secret", default="")
     parser.add_argument("--task-prefix", default=None)
+    parser.add_argument("--project-dir", default="")
     parser.add_argument("--base-config", default="")
     args = parser.parse_args()
 

@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.5.0 - 2026-03-14
+
+### Added
+- Added clickable agent inspector drawers so users can open any agent card and inspect live focus, recent signals, and in-hand tasks.
+- Added task replay drawers that expose route, TODO progress, and chronological handoff/progress history from both task cards and timeline events.
+
+### Changed
+- Refactored `templates/scripts/collaboration_dashboard.py` into a richer mission-control UI with drill-down interactions while keeping HTML + JSON snapshot generation and the live SSE server.
+- Expanded dashboard JSON payloads with `taskIndex`, replay entries, recent agent signals, and active task cards to support richer downstream visualizations.
+
+### Fixed
+- Counted only non-terminal tasks toward agent active-state metrics so completed work no longer leaves agents falsely marked active.
+- Suppressed the browser `favicon.ico` 404 noise in the live dashboard UI.
+
 ## 1.4.0 - 2026-03-14
 
 ### Added
